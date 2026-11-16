@@ -1,4 +1,4 @@
-# Pinecone Agent Harness (v2)
+# Pinecone Agent Harness (v2. 2)
 
 Production-oriented **agentic chatbot** with:
 
