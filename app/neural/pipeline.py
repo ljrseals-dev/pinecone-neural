@@ -1,9 +1,4 @@
-"""
-Neural Recall Pipeline – Layers 2 (GNN) + 3 (Synaptic) + 4 (Utility)
-"""
-
-from __future__ import annotations
-
+"""Neural recall pipeline: GNN rerank + synaptic spreading + MemRL utility."""
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -12,51 +7,39 @@ from app.neural.sidecar import VectorSidecar
 from app.neural.synaptic import SynapticLayer
 from app.neural.utility import UtilityModel
 
-logger = logging.getLogger("harness.neural")
+logger = logging.getLogger(__name__)
 
 
 class NeuralRecallPipeline:
-    def __init__(
-        self,
-        sidecar: Optional[VectorSidecar] = None,
-        synaptic: Optional[SynapticLayer] = None,
-        utility: Optional[UtilityModel] = None,
-        enable_gnn: bool = True,
-        enable_synaptic: bool = True,
-        enable_utility: bool = True,
-        gnn_alpha: float = 0.60,
-        synaptic_hops: int = 1,
-        utility_lambda: float = 0.5,
-    ):
-        self.sidecar = sidecar or VectorSidecar()
-        self.synaptic = synaptic or SynapticLayer()
-        self.utility = utility or UtilityModel()
+    def __init__(self, enable_gnn: bool = True, enable_synaptic: bool = True,
+                 enable_utility: bool = True):
         self.enable_gnn = enable_gnn
         self.enable_synaptic = enable_synaptic
         self.enable_utility = enable_utility
-        self.gnn_alpha = gnn_alpha
-        self.synaptic_hops = synaptic_hops
-        self.utility_lambda = utility_lambda  # blend of similarity vs utility
+        self.sidecar = VectorSidecar() if enable_gnn else None
+        self.synaptic = SynapticLayer() if enable_synaptic else None
+        self.utility = UtilityModel() if enable_utility else None
 
-    # ------------------------------------------------------------------
-    # Write hooks
-    # ------------------------------------------------------------------
-    def on_remember(
-        self,
-        memory_id: str,
-        vector: List[float],
-        importance: float = 0.5,
-    ) -> None:
-        self.sidecar.put(memory_id, vector)
-        if self.enable_synaptic:
-            self.synaptic.on_remember(memory_id, importance=importance)
+    def on_remember(self, memory_id: str, vector: List[float],
+                    text: str, metadata: Dict[str, Any]) -> None:
+        if self.sidecar:
+            try:
+                self.sidecar.put(memory_id, vector)
+            except Exception as e:
+                logger.warning("Sidecar put failed: %s", e)
+        if self.synaptic:
+            try:
+                self.synaptic.on_remember(memory_id, text, metadata)
+            except Exception as e:
+                logger.warning("Synaptic remember failed: %s", e)
 
-    def on_coactivation(self, ids: List[str], success: bool) -> None:
-        if not self.enable_synaptic or len(ids) < 2:
+    def on_coactivation(self, memory_ids: List[str], success: bool) -> None:
+        if not self.synaptic or len(memory_ids) < 2:
             return
-        for i, a in enumerate(ids):
-            for b in ids[i + 1 :]:
-                self.synaptic.on_coactivation(a, b, success=success)
+        try:
+            self.synaptic.on_coactivation(memory_ids, success)
+        except Exception as e:
+            logger.warning("Synaptic coactivation failed: %s", e)
 
     def on_episode_reward(
         self,
@@ -65,101 +48,48 @@ class NeuralRecallPipeline:
         similarities: Optional[List[float]] = None,
     ) -> None:
         """Call at the end of an agent run with the memories that were used."""
-        if self.enable_utility and retrieved_metas:
+        if not self.enable_utility or not retrieved_metas:
+            return
+        try:
+            loss = self.utility.update(retrieved_metas, reward, similarities)
+            if loss is not None:
+                logger.debug("Utility update loss=%.4f reward=%.2f", loss, reward)
+        except Exception as e:
+            logger.warning("Utility update failed: %s", e)
+
+    def enhance(self, query_vec: List[float], matches: List[Any],
+                top_k: int = 10) -> List[Dict[str, Any]]:
+        candidates = [
+            {"id": m.id, "score": m.score, "metadata": m.metadata}
+            for m in matches
+        ]
+        if self.enable_gnn and self.sidecar and len(candidates) >= 3:
             try:
-                loss = self.utility.update(retrieved_metas, reward, similarities)
-                if loss is not None:
-                    logger.debug("Utility update loss=%.4f reward=%.2f", loss, reward)
+                ids = [c["id"] for c in candidates]
+                vectors = self.sidecar.get_many(ids)
+                for c in candidates:
+                    c["vector"] = vectors.get(c["id"])
+                candidates = [c for c in candidates if c.get("vector")]
+                if len(candidates) >= 3:
+                    candidates = gnn_score_diffusion(query_vec, candidates)
             except Exception as e:
-                logger.warning("Utility update failed: %s", e)
+                logger.warning("GNN diffusion failed: %s", e)
 
-    # ------------------------------------------------------------------
-    # Enhanced recall
-    # ------------------------------------------------------------------
-    def enhance(
-        self,
-        raw_matches: List[Dict[str, Any]],
-        top_k: int = 10,
-    ) -> List[Dict[str, Any]]:
-        if not raw_matches:
-            return []
-
-        candidates = list(raw_matches)
-
-        # Layer 2 – GNN diffusion
-        if self.enable_gnn:
-            ids = [c["id"] for c in candidates]
-            vectors = self.sidecar.get_many(ids)
-            gnn_input = []
-            for c in candidates:
-                vec = vectors.get(c["id"])
-                if vec is not None:
-                    gnn_input.append(
-                        {
-                            "id": c["id"],
-                            "vector": vec,
-                            "score": float(c.get("score", 0.0)),
-                            "_orig": c,
-                        }
-                    )
-            if len(gnn_input) >= 3:
-                try:
-                    reranked = gnn_score_diffusion(gnn_input, alpha=self.gnn_alpha)
-                    candidates = []
-                    for item in reranked:
-                        orig = item["_orig"]
-                        orig["diffused_score"] = item["diffused_score"]
-                        candidates.append(orig)
-                except Exception as e:
-                    logger.warning("GNN diffusion failed: %s", e)
-
-        # Layer 3 – Synaptic spreading
-        if self.enable_synaptic and candidates:
-            seed_ids = [c["id"] for c in candidates[:5]]
+        if self.enable_synaptic and self.synaptic and candidates:
             try:
-                activated = self.synaptic.spread(
-                    seed_ids, hops=self.synaptic_hops, top_n=top_k
-                )
-                known = {c["id"] for c in candidates}
-                for node in activated:
-                    if node.id not in known:
-                        candidates.append(
-                            {
-                                "id": node.id,
-                                "score": node.activation,
-                                "diffused_score": node.activation,
-                                "text": "",
-                                "role": "associated",
-                                "synaptic": True,
-                                "hops": node.hops,
-                                "importance": 0.5,
-                                "is_summary": False,
-                                "access_count": 0,
-                            }
-                        )
-                        known.add(node.id)
+                seeds = [c["id"] for c in candidates[:5]]
+                associated = self.synaptic.spread(seeds, hops=1, decay=0.5)
+                seen = {c["id"] for c in candidates}
+                for node in associated:
+                    if node["id"] not in seen:
+                        candidates.append({
+                            "id": node["id"],
+                            "score": node["score"],
+                            "metadata": node.get("metadata", {}),
+                        })
             except Exception as e:
                 logger.warning("Synaptic spread failed: %s", e)
 
-        # Layer 4 – Learned utility blend
-        if self.enable_utility and candidates:
-            try:
-                for c in candidates:
-                    sim = float(c.get("diffused_score", c.get("score", 0.0)))
-                    util = self.utility.score(sim, c)
-                    # rank = (1-λ)·sim + λ·utility   (both roughly in [0,1])
-                    c["utility"] = util
-                    c["final_score"] = (
-                        (1.0 - self.utility_lambda) * sim
-                        + self.utility_lambda * util
-                    )
-            except Exception as e:
-                logger.warning("Utility scoring failed: %s", e)
-                for c in candidates:
-                    c["final_score"] = float(c.get("diffused_score", c.get("score", 0.0)))
-        else:
-            for c in candidates:
-                c["final_score"] = float(c.get("diffused_score", c.get("score", 0.0)))
-
-        candidates.sort(key=lambda x: x["final_score"], reverse=True)
+        candidates.sort(key=lambda c: c.get("diffused_score", c["score"]),
+                        reverse=True)
         return candidates[:top_k]
