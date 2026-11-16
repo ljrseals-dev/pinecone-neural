@@ -80,6 +80,17 @@ class AgentHarness:
         self._used_memory_ids: List[str] = []
         self._used_metas: List[Dict[str, Any]] = []
 
+    def _step_coactivation(self, step_ids: List[str], success: bool) -> None:
+        """Per-step Hebbian update: edges form among memories used in the same step."""
+        neural = getattr(self.memory, "neural", None)
+        if neural is None or len(step_ids) < 2:
+            return
+        try:
+            neural.on_coactivation(step_ids, success=success)
+        except Exception as e:
+            logger.warning("Per-step coactivation failed: %s", e)
+
+
     def run(self, task: str, max_steps: Optional[int] = None) -> Dict[str, Any]:
         max_steps = max_steps or settings.max_steps
         try:
@@ -120,14 +131,17 @@ class AgentHarness:
 
             self.tokens_used += composition.get("total", 0)
 
-            # Capture memories that entered the context for this step
+            # Capture memories that entered the context for THIS step
+            step_memory_ids: List[str] = []
             try:
                 recalled = self.memory.recall(task, top_k=8)
                 for m in recalled:
                     mid = m.get("id")
-                    if mid and mid not in self._used_memory_ids:
-                        self._used_memory_ids.append(mid)
-                        self._used_metas.append(m)
+                    if mid:
+                        step_memory_ids.append(mid)
+                        if mid not in self._used_memory_ids:
+                            self._used_memory_ids.append(mid)
+                            self._used_metas.append(m)
             except Exception:
                 pass
 
@@ -155,6 +169,8 @@ class AgentHarness:
                 self.memory.remember(
                     f"Malformed model output: {raw[:300]}", role="system"
                 )
+                # Still record co-activation for this step (partial failure)
+                self._step_coactivation(step_memory_ids, success=False)
                 continue
 
             if payload.get("type") == "final_answer":
@@ -166,19 +182,24 @@ class AgentHarness:
                     pinned=True,
                 )
                 status = "completed"
+                # Successful step: strengthen edges among memories used here
+                self._step_coactivation(step_memory_ids, success=True)
                 break
 
             if payload.get("type") != "tool_call":
+                self._step_coactivation(step_memory_ids, success=False)
                 continue
 
             code = (payload.get("code") or "").strip()
             if not code:
+                self._step_coactivation(step_memory_ids, success=False)
                 continue
 
             code_hash = hashlib.sha256(code.encode()).hexdigest()
             if code_hash in self.seen_hashes:
                 status = "repeated_tool_call"
                 final_answer = "Stopped: repeated identical tool call detected."
+                self._step_coactivation(step_memory_ids, success=False)
                 break
             self.seen_hashes.add(code_hash)
 
@@ -189,6 +210,8 @@ class AgentHarness:
                 provenance="tool_execution",
             )
             history.append({"role": "tool", "content": output[:1500]})
+            # Tool call succeeded as a reasoning step
+            self._step_coactivation(step_memory_ids, success=True)
 
         if final_answer is None:
             final_answer = "Agent reached max steps without a final answer."

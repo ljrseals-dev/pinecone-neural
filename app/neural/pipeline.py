@@ -68,7 +68,8 @@ class NeuralRecallPipeline:
         if self.enable_utility and retrieved_metas:
             try:
                 loss = self.utility.update(retrieved_metas, reward, similarities)
-                logger.debug("Utility update loss=%.4f reward=%.2f", loss, reward)
+                if loss is not None:
+                    logger.debug("Utility update loss=%.4f reward=%.2f", loss, reward)
             except Exception as e:
                 logger.warning("Utility update failed: %s", e)
 

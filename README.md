@@ -1,4 +1,4 @@
-# Pinecone Agent Harness (v2. 2)
+# Pinecone Agent Harness (v2)
 
 Production-oriented **agentic chatbot** with:
 
@@ -219,3 +219,19 @@ At the end of every agent run:
 1. All memory IDs that entered context are collected.
 2. `on_coactivation(ids, success)` strengthens/weakens Hebbian edges.
 3. `on_episode_reward(metas, reward)` updates the utility MLP (reward = 1.0 on clean completion).
+
+---
+
+## v2.3 — Per-step co-activation (non-cosmetic)
+
+Hebbian edges are now updated **after every reasoning step**, not only at the
+end of the run. Memories that co-occur in the same step form stronger
+associative links; this is strictly more informative than run-level aggregation.
+
+```
+for each step:
+    recall → LLM → tool/answer
+    on_coactivation(step_memory_ids, success=this_step_ok)
+at end of run:
+    on_episode_reward(all_used_metas, reward)   # still feeds MemRL
+```
