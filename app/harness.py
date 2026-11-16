@@ -1,5 +1,6 @@
 """
-Agentic loop with structured termination and restricted tool execution.
+Agentic loop with structured termination, restricted tool execution,
+and neural memory co-activation / reward feedback.
 """
 
 from __future__ import annotations
@@ -75,6 +76,9 @@ class AgentHarness:
         self.seen_hashes: set[str] = set()
         self.tokens_used = 0
         self.steps_taken = 0
+        # Track memory IDs that participated in this run (for Hebbian + utility)
+        self._used_memory_ids: List[str] = []
+        self._used_metas: List[Dict[str, Any]] = []
 
     def run(self, task: str, max_steps: Optional[int] = None) -> Dict[str, Any]:
         max_steps = max_steps or settings.max_steps
@@ -95,6 +99,8 @@ class AgentHarness:
         history: List[Dict[str, str]] = []
         final_answer: Optional[str] = None
         status = "max_steps"
+        self._used_memory_ids = []
+        self._used_metas = []
 
         for step in range(max_steps):
             self.steps_taken = step + 1
@@ -113,6 +119,17 @@ class AgentHarness:
                 break
 
             self.tokens_used += composition.get("total", 0)
+
+            # Capture memories that entered the context for this step
+            try:
+                recalled = self.memory.recall(task, top_k=8)
+                for m in recalled:
+                    mid = m.get("id")
+                    if mid and mid not in self._used_memory_ids:
+                        self._used_memory_ids.append(mid)
+                        self._used_metas.append(m)
+            except Exception:
+                pass
 
             try:
                 response = self.client.chat.completions.create(
@@ -176,6 +193,20 @@ class AgentHarness:
         if final_answer is None:
             final_answer = "Agent reached max steps without a final answer."
 
+        # ------------------------------------------------------------------
+        # Neural feedback: Hebbian co-activation + utility reward
+        # ------------------------------------------------------------------
+        success = status == "completed"
+        neural = getattr(self.memory, "neural", None)
+        if neural is not None and self._used_memory_ids:
+            try:
+                neural.on_coactivation(self._used_memory_ids, success=success)
+                # Reward: 1.0 on clean completion, 0.3 on max_steps, 0.0 on errors
+                reward = 1.0 if success else (0.3 if status == "max_steps" else 0.0)
+                neural.on_episode_reward(self._used_metas, reward=reward)
+            except Exception as e:
+                logger.warning("Neural feedback failed: %s", e)
+
         return {
             "session_id": self.session_id,
             "answer": final_answer,
@@ -183,4 +214,5 @@ class AgentHarness:
             "steps": self.steps_taken,
             "tokens_used": self.tokens_used,
             "history_length": len(history),
+            "memories_used": len(self._used_memory_ids),
         }

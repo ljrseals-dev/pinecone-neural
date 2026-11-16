@@ -1,4 +1,4 @@
-# Pinecone Neural Agent Harness (v1)
+# Pinecone Agent Harness (v2)
 
 Production-oriented **agentic chatbot** with:
 
@@ -187,3 +187,35 @@ app/neural/
 ```
 
 Local data is written under `data/synapses.db` and `data/vectors.db`.
+
+---
+
+## v2.2 Hardening + Layer 4
+
+### Critical fixes from the assessment
+
+| Issue | Fix |
+|-------|-----|
+| `on_coactivation` never called | Wired into agent loop termination with success/failure signal |
+| SQLite thread safety | Connection-per-thread for both `vectors.db` and `synapses.db` |
+| Sidecar storage bloat | Binary float32 blobs via `struct` (~5× smaller than JSON) |
+| Utility scoring missing | Layer 4 MemRL-style MLP implemented with cold-start imitation |
+
+### Layer status (v2.2)
+
+| Layer | Status |
+|-------|--------|
+| 2 GNN Score Diffusion | ✅ Production-shaped, binary sidecar |
+| 3 Synaptic Associative Memory | ✅ Thread-safe, Hebbian feedback wired |
+| 4 Learned Utility (MemRL) | ✅ MLP + hand-tuned cold-start + online updates |
+| 5 Neuro-Symbolic KG | Interface ready |
+| 1 Neural Compression | Planned |
+| 6 Differentiable Hippocampal | Frontier |
+
+### Neural feedback loop
+
+At the end of every agent run:
+
+1. All memory IDs that entered context are collected.
+2. `on_coactivation(ids, success)` strengthens/weakens Hebbian edges.
+3. `on_episode_reward(metas, reward)` updates the utility MLP (reward = 1.0 on clean completion).

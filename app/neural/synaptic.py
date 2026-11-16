@@ -2,16 +2,17 @@
 Layer 3: Synaptic Associative Memory
 
 Hebbian edge weights + spreading activation.
-Pure-Python / SQLite implementation – zero external deps beyond stdlib.
+Thread-safe SQLite (connection-per-thread).
 """
 
 from __future__ import annotations
 
 import sqlite3
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Set, Tuple
 
 
 @dataclass
@@ -25,20 +26,32 @@ class SynapticLayer:
     """
     Lightweight associative graph stored in SQLite.
 
-    - Nodes are memory IDs (with optional importance / vitality metadata).
-    - Edges are directed Hebbian weights in [0, 1].
-    - Spreading activation surfaces neighbors that pure vector similarity misses.
+    - Nodes = memory IDs (importance, vitality, access_count)
+    - Edges = Hebbian weights in [0, 1]
+    - Spreading activation surfaces neighbors pure vector similarity misses
     """
 
     def __init__(self, db_path: str | Path = "data/synapses.db"):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
-        self.conn.execute("PRAGMA journal_mode=WAL")
+        self._local = threading.local()
         self._init_schema()
 
+    def _conn(self) -> sqlite3.Connection:
+        if not getattr(self._local, "conn", None):
+            conn = sqlite3.connect(
+                str(self.db_path),
+                check_same_thread=True,
+                timeout=30.0,
+            )
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            self._local.conn = conn
+        return self._local.conn
+
     def _init_schema(self) -> None:
-        self.conn.executescript(
+        conn = self._conn()
+        conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS nodes (
                 id          TEXT PRIMARY KEY,
@@ -57,32 +70,29 @@ class SynapticLayer:
             CREATE INDEX IF NOT EXISTS idx_edges_dst ON edges(dst);
             """
         )
-        self.conn.commit()
+        conn.commit()
 
-    # ------------------------------------------------------------------
-    # Write path
-    # ------------------------------------------------------------------
     def on_remember(
         self,
         memory_id: str,
         importance: float = 0.5,
         vitality: float = 1.0,
     ) -> None:
-        """Register or refresh a memory node."""
         now = time.time()
-        self.conn.execute(
+        conn = self._conn()
+        conn.execute(
             """
             INSERT INTO nodes (id, importance, vitality, access_count, last_access)
             VALUES (?, ?, ?, 1, ?)
             ON CONFLICT(id) DO UPDATE SET
-                importance = excluded.importance,
-                vitality   = excluded.vitality,
+                importance   = excluded.importance,
+                vitality     = excluded.vitality,
                 access_count = access_count + 1,
-                last_access = excluded.last_access
+                last_access  = excluded.last_access
             """,
             (memory_id, importance, vitality, now),
         )
-        self.conn.commit()
+        conn.commit()
 
     def on_coactivation(
         self,
@@ -92,12 +102,12 @@ class SynapticLayer:
         delta_success: float = 0.10,
         delta_failure: float = -0.15,
     ) -> None:
-        """Hebbian update: strengthen on success, weaken on failure."""
         if id_a == id_b:
             return
         delta = delta_success if success else delta_failure
-        for src, dst in ((id_a, id_b), (id_b, id_a)):  # undirected for simplicity
-            self.conn.execute(
+        conn = self._conn()
+        for src, dst in ((id_a, id_b), (id_b, id_a)):
+            conn.execute(
                 """
                 INSERT INTO edges (src, dst, weight) VALUES (?, ?, ?)
                 ON CONFLICT(src, dst) DO UPDATE SET
@@ -105,11 +115,8 @@ class SynapticLayer:
                 """,
                 (src, dst, max(0.0, min(1.0, 0.1 + delta)), delta),
             )
-        self.conn.commit()
+        conn.commit()
 
-    # ------------------------------------------------------------------
-    # Read path – spreading activation
-    # ------------------------------------------------------------------
     def spread(
         self,
         seed_ids: List[str],
@@ -117,23 +124,19 @@ class SynapticLayer:
         decay: float = 0.5,
         top_n: int = 20,
     ) -> List[ActivatedNode]:
-        """
-        Breadth-first spreading activation from seed nodes.
-
-        Activation of a neighbor = parent_activation * edge_weight * decay.
-        """
         if not seed_ids:
             return []
 
         activation: Dict[str, float] = {sid: 1.0 for sid in seed_ids}
         hop_of: Dict[str, int] = {sid: 0 for sid in seed_ids}
         frontier: Set[str] = set(seed_ids)
+        conn = self._conn()
 
         for h in range(1, hops + 1):
             next_frontier: Set[str] = set()
             for node in frontier:
                 parent_act = activation.get(node, 0.0)
-                cur = self.conn.execute(
+                cur = conn.execute(
                     "SELECT dst, weight FROM edges WHERE src = ?", (node,)
                 )
                 for dst, weight in cur.fetchall():
@@ -149,16 +152,12 @@ class SynapticLayer:
             if not frontier:
                 break
 
-        # Rank by activation * importance * vitality
         ranked: List[Tuple[str, float, int]] = []
         for mid, act in activation.items():
-            row = self.conn.execute(
+            row = conn.execute(
                 "SELECT importance, vitality FROM nodes WHERE id = ?", (mid,)
             ).fetchone()
-            if row:
-                imp, vit = row
-            else:
-                imp, vit = 0.5, 1.0
+            imp, vit = (row[0], row[1]) if row else (0.5, 1.0)
             score = act * float(imp) * float(vit)
             ranked.append((mid, score, hop_of.get(mid, 0)))
 
@@ -169,4 +168,6 @@ class SynapticLayer:
         ]
 
     def close(self) -> None:
-        self.conn.close()
+        if getattr(self._local, "conn", None):
+            self._local.conn.close()
+            self._local.conn = None
