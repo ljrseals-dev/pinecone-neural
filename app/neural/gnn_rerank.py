@@ -1,0 +1,81 @@
+"""
+Layer 2: GNN Score Diffusion Reranking
+
+Parameter-free 1-hop message passing over the candidate k-NN subgraph.
+Recovers rank inversions introduced by HNSW / product quantization.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Dict, List
+
+import numpy as np
+
+
+def gnn_score_diffusion(
+    candidates: List[Dict[str, Any]],
+    alpha: float = 0.60,
+    k_graph: int = 10,
+) -> List[Dict[str, Any]]:
+    """
+    Rerank ANN candidates via 1-hop score diffusion on their mutual similarity graph.
+
+    Parameters
+    ----------
+    candidates : list of dicts
+        Each must contain:
+          - "id": str
+          - "vector": list[float] | np.ndarray  (full-precision)
+          - "score": float                      (noisy ANN score)
+    alpha : float
+        Diffusion strength. 0 = pure original scores, 1 = pure neighbor average.
+    k_graph : int
+        Number of neighbors used to build the local adjacency.
+
+    Returns
+    -------
+    Reranked list (same dicts, with added "diffused_score"), sorted descending.
+    """
+    n = len(candidates)
+    if n < 3:
+        for c in candidates:
+            c["diffused_score"] = float(c.get("score", 0.0))
+        return candidates
+
+    # 1. Stack full-precision vectors
+    V = np.asarray([c["vector"] for c in candidates], dtype=np.float32)
+    norms = np.linalg.norm(V, axis=1, keepdims=True) + 1e-8
+    V_norm = V / norms
+
+    # 2. Pairwise cosine similarity
+    sim_matrix = V_norm @ V_norm.T  # (n, n)
+
+    # 3. Build sparse adjacency: top-k neighbors per node (exclude self)
+    adj = np.zeros((n, n), dtype=np.float32)
+    k = min(k_graph, n - 1)
+    for i in range(n):
+        row = sim_matrix[i].copy()
+        row[i] = -np.inf
+        top_idx = np.argpartition(row, -k)[-k:]
+        adj[i, top_idx] = row[top_idx]
+
+    # 4. Row-normalize → transition matrix
+    row_sums = adj.sum(axis=1, keepdims=True) + 1e-8
+    P = adj / row_sums
+
+    # 5. Initial scores (min-max normalized)
+    s0 = np.array([float(c.get("score", 0.0)) for c in candidates], dtype=np.float32)
+    s_min, s_max = s0.min(), s0.max()
+    if s_max - s_min > 1e-8:
+        s0 = (s0 - s_min) / (s_max - s_min)
+    else:
+        s0 = np.ones_like(s0) * 0.5
+
+    # 6. One-hop diffusion
+    s1 = alpha * (P @ s0) + (1.0 - alpha) * s0
+
+    # 7. Write back and sort
+    for i, c in enumerate(candidates):
+        c["diffused_score"] = float(s1[i])
+
+    return sorted(candidates, key=lambda x: x["diffused_score"], reverse=True)
