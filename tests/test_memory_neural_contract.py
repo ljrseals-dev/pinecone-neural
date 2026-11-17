@@ -2,6 +2,7 @@ from types import SimpleNamespace
 import asyncio
 
 from app.memory import PineconeMemory
+from app.config import settings
 
 
 class FakeIndex:
@@ -35,7 +36,8 @@ class FakeNeural:
         self.args = (memory_id, vector, text, metadata)
 
 
-def test_remember_preserves_namespace_fields_and_calls_neural_contract():
+def test_remember_preserves_namespace_fields_and_calls_neural_contract(monkeypatch):
+    monkeypatch.setattr(settings, "embedding_dim", 3)
     memory = PineconeMemory.__new__(PineconeMemory)
     memory.namespace = "user:operator:session:s1"
     memory.index = FakeIndex()
