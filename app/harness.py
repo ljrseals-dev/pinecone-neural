@@ -4,6 +4,7 @@ Model output is data only. It is never compiled, eval'd, or exec'd.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -87,7 +88,7 @@ class AgentHarness:
             raise ValueError("max_steps must be between 1 and 12")
 
         try:
-            self.memory.prune()
+            await asyncio.to_thread(self.memory.prune)
         except Exception as exc:
             logger.warning("Prune failed (non-fatal): %s", type(exc).__name__)
 
@@ -107,7 +108,9 @@ class AgentHarness:
         messages: List[Dict[str, str]] = [{"role": "system", "content": system}]
         messages.extend(self.conversation_history)
         try:
-            context_prompt, _ = self.memory.build_context(query=task, system_prompt="")
+            context_prompt, _ = await asyncio.to_thread(
+                self.memory.build_context, query=task, system_prompt=""
+            )
         except RuntimeError as exc:
             logger.error("Context build failed: %s", type(exc).__name__)
             return {"session_id": self.session_id, "answer": "Context limit exceeded.",
@@ -148,7 +151,7 @@ class AgentHarness:
 
             step_memory_ids: List[str] = []
             try:
-                for item in self.memory.recall(task, top_k=8):
+                for item in await asyncio.to_thread(self.memory.recall, task, top_k=8):
                     memory_id = item.get("id")
                     if memory_id:
                         step_memory_ids.append(memory_id)
@@ -203,7 +206,7 @@ class AgentHarness:
                     messages.append({"role": "user", "content": "The final_answer field must be a string."})
                     continue
                 final_answer = sanitize_untrusted(answer[:12000])
-                self.memory.remember(final_answer, role="assistant", importance=0.9, pinned=True)
+                await asyncio.to_thread(self.memory.remember, final_answer, role="assistant", importance=0.9, pinned=True)
                 status = "completed"
                 self._step_coactivation(step_memory_ids, success=True)
                 break
@@ -232,7 +235,8 @@ class AgentHarness:
             output = await self.tools.execute(name, arguments)
             succeeded = not output.startswith("ToolError:")
             safe_output = sanitize_untrusted(output)
-            self.memory.remember(
+            await asyncio.to_thread(
+                self.memory.remember,
                 f"Tool output ({name}):\n{safe_output}",
                 role="tool", provenance="registered_tool",
             )
