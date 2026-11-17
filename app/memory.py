@@ -285,7 +285,10 @@ class PineconeMemory:
         legacy_epoch_updates = []
         for m in results.matches:
             meta = m.metadata or {}
-            if not meta.get("created_at_epoch") and meta.get("created_at"):
+            if (
+                not meta.get("created_at_epoch")
+                or "deleted_at_epoch" not in meta
+            ) and meta.get("created_at"):
                 try:
                     created_epoch = datetime.fromisoformat(
                         str(meta["created_at"]).replace("Z", "+00:00")
@@ -325,7 +328,10 @@ class PineconeMemory:
             try:
                 self.index.update(
                     id=memory_id, namespace=self.namespace,
-                    set_metadata={"created_at_epoch": created_epoch},
+                    set_metadata={
+                        "created_at_epoch": created_epoch,
+                        "deleted_at_epoch": 0.0,
+                    },
                 )
             except Exception as exc:
                 logger.warning("Legacy memory timestamp migration failed: %s", type(exc).__name__)
