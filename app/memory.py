@@ -203,7 +203,6 @@ class PineconeMemory:
                     namespace=self.namespace,
                     set_metadata={
                         "schema_version": "2.1",
-                        "schema_version": "2.1",
                         "created_at_epoch": created_epoch,
                         "deleted_at_epoch": 0.0,
                         "access_count": access_count,
@@ -350,6 +349,7 @@ class PineconeMemory:
                 self.index.update(
                     id=memory_id, namespace=self.namespace,
                     set_metadata={
+                        "schema_version": "2.1",
                         "created_at_epoch": created_epoch,
                         "deleted_at_epoch": 0.0,
                     },
