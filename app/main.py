@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import uuid
 from contextlib import asynccontextmanager
 from typing import Any, Dict, Optional
@@ -45,6 +46,14 @@ pc = Pinecone(api_key=settings.pinecone_api_key)
 openai_client = OpenAI(api_key=settings.openai_api_key)
 
 
+def build_namespace(principal: str, session_id: str) -> str:
+    raw = f"user:{principal}:session:{session_id}"
+    if len(raw.encode("utf-8")) <= 64:
+        return raw
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    return "u-" + digest[:62]
+
+
 class ChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     message: str = Field(min_length=1, max_length=12000)
@@ -86,7 +95,7 @@ async def chat(
 
     memory = await asyncio.to_thread(
         PineconeMemory,
-        namespace=f"user:{principal}:session:{session_id}",
+        namespace=build_namespace(principal, session_id),
         pc=pc,
         openai_client=openai_client,
     )
