@@ -185,16 +185,36 @@ class PineconeMemory:
         # Idempotent path
         existing = self.index.fetch(ids=[vid], namespace=self.namespace)
         if existing.vectors:
-            meta = existing.vectors[vid].metadata or {}
+            existing_vector = existing.vectors[vid]
+            meta = existing_vector.metadata or {}
             if not meta.get("deleted_at"):
+                try:
+                    access_count = max(0, int(meta.get("access_count", 0))) + 1
+                except (TypeError, ValueError):
+                    access_count = 1
+                try:
+                    created_epoch = float(meta.get("created_at_epoch") or datetime.fromisoformat(
+                        str(meta.get("created_at", now)).replace("Z", "+00:00")
+                    ).timestamp())
+                except (TypeError, ValueError, OverflowError):
+                    created_epoch = time.time()
                 self.index.update(
                     id=vid,
                     namespace=self.namespace,
                     set_metadata={
-                        "access_count": int(meta.get("access_count", 0)) + 1,
+                        "schema_version": "2.1",
+                        "schema_version": "2.1",
+                        "created_at_epoch": created_epoch,
+                        "deleted_at_epoch": 0.0,
+                        "access_count": access_count,
                         "last_accessed_at": now,
                     },
                 )
+                values = getattr(existing_vector, "values", None)
+                if self.neural is not None and values:
+                    self.neural.on_remember(
+                        vid, list(values), meta.get("text", clean), meta
+                    )
                 return vid
             # Re-remembering a soft-deleted item must revive it through upsert.
 
@@ -221,7 +241,7 @@ class PineconeMemory:
                 return m.id
 
         meta = {
-            "schema_version": "2.0",
+            "schema_version": "2.1",
             "session_id": self.namespace,
             "role": role,
             "text": clean,
