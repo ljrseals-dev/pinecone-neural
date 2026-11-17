@@ -198,6 +198,8 @@ class PineconeMemory:
                     ).timestamp())
                 except (TypeError, ValueError, OverflowError):
                     created_epoch = time.time()
+                effective_importance = max(float(meta.get("importance", 0.5)), importance)
+                effective_pinned = bool(meta.get("pinned", False) or pinned)
                 self.index.update(
                     id=vid,
                     namespace=self.namespace,
@@ -205,16 +207,21 @@ class PineconeMemory:
                         "schema_version": "2.1",
                         "created_at_epoch": created_epoch,
                         "deleted_at_epoch": 0.0,
-                        "importance": max(float(meta.get("importance", 0.5)), importance),
-                        "pinned": bool(meta.get("pinned", False) or pinned),
+                        "importance": effective_importance,
+                        "pinned": effective_pinned,
                         "access_count": access_count,
                         "last_accessed_at": now,
                     },
                 )
                 values = getattr(existing_vector, "values", None)
                 if self.neural is not None and values:
+                    neural_meta = {
+                        **meta,
+                        "importance": effective_importance,
+                        "pinned": effective_pinned,
+                    }
                     self.neural.on_remember(
-                        vid, list(values), meta.get("text", clean), meta
+                        vid, list(values), meta.get("text", clean), neural_meta
                     )
                 return vid
             # Re-remembering a soft-deleted item must revive it through upsert.
