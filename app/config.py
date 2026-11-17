@@ -1,3 +1,4 @@
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -21,17 +22,22 @@ class Settings(BaseSettings):
     llm_model: str = "gpt-4o-mini"
     summarizer_model: str = "gpt-4o-mini"
 
-    max_context_tokens: int = 3500
-    summary_token_limit: int = 200
+    max_context_tokens: int = Field(default=3500, ge=256, le=32000)
+    summary_token_limit: int = Field(default=200, ge=32, le=4000)
     prune_age_days: int = 7
     prune_utility_floor: float = 0.15
     soft_delete_retention_days: int = 14
 
-    max_steps: int = 6
-    max_run_tokens: int = 50_000
-    max_run_usd: float = 0.25
-    tool_timeout_s: float = 2.0
-    tool_output_max_bytes: int = 4096
+    max_steps: int = Field(default=6, ge=1, le=12)
+    max_run_tokens: int = Field(default=50_000, ge=256, le=2_000_000)
+    max_run_usd: float = Field(default=0.25, gt=0.0, le=100.0)
+    # Configurable estimate rates in USD per 1M tokens. Keep these aligned
+    # with the selected provider/model pricing before enabling cost limits.
+    llm_input_cost_per_1m: float = Field(default=0.15, ge=0.0, le=10000.0)
+    llm_output_cost_per_1m: float = Field(default=0.60, ge=0.0, le=10000.0)
+    tool_timeout_s: float = Field(default=2.0, gt=0.0, le=60.0)
+    tool_output_max_bytes: int = Field(default=4096, ge=128, le=1048576)
+    utility_model_path: str = "data/utility_model.json"
 
     # API
     api_keys: str = ""
