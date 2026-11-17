@@ -1,4 +1,4 @@
-# Pinecone Neural Agent Harness (v2.5)
+# Pinecone Neural Agent Harness (v2.6)
 
 Production-oriented **agentic chatbot** with:
 
@@ -74,3 +74,12 @@ Response shape:
 ```
 
 Reuse the returned `session_id` with the same API-key identity to continue the session.
+
+## Resource and security controls
+
+- Prior conversation history is replayed only for the authenticated user's session and is bounded to recent user/assistant turns.
+- Tool execution uses the configured `TOOL_TIMEOUT_S` and `TOOL_OUTPUT_MAX_BYTES` limits.
+- Each run tracks chat-completion and embedding tokens. `MAX_RUN_USD` uses configurable estimated rates: `LLM_INPUT_COST_PER_1M`, `LLM_OUTPUT_COST_PER_1M`, and `EMBEDDING_COST_PER_1M`. Keep these rates aligned with the active provider/model pricing; provider-side billing can differ from estimates.
+- Neural storage paths are configurable through `SIDECAR_DB`, `SYNAPTIC_DB`, and `UTILITY_MODEL_PATH`; the health endpoint reads those same paths.
+- The local runner defaults to loopback. Docker binds inside the container; publish it only to host loopback unless an authenticated reverse-proxy/TLS setup is deliberately configured.
+- Browser CORS is disabled by default. Set `CORS_ORIGINS` only to explicit trusted origins; wildcard origins are rejected.
