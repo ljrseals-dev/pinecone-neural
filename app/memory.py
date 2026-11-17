@@ -200,7 +200,7 @@ class PineconeMemory:
         # Neural write path (sidecar + synaptic node)
         if self.neural is not None:
             try:
-                self.neural.on_remember(vid, emb, importance=importance)
+                self.neural.on_remember(vid, emb, clean, meta)
             except Exception as e:
                 logger.warning("Neural on_remember failed: %s", e)
 
@@ -210,8 +210,9 @@ class PineconeMemory:
         # Over-fetch when neural reranking is active
         fetch_k = top_k * 3 if (use_neural and self.neural) else top_k
 
+        query_vector = self._embed(query)
         results = self.index.query(
-            vector=self._embed(query),
+            vector=query_vector,
             top_k=fetch_k,
             include_metadata=True,
             namespace=self.namespace,
@@ -236,9 +237,28 @@ class PineconeMemory:
         # Neural enhancement (GNN diffusion + synaptic spreading)
         if use_neural and self.neural is not None and out:
             try:
-                out = self.neural.enhance(out, top_k=top_k)
+                out = self.neural.enhance(query_vector, out, top_k=top_k)
+                # Synaptic spreading can return IDs outside the ANN candidate
+                # set. Hydrate those IDs before exposing them as memory results.
+                missing = [item["id"] for item in out if not item.get("text")]
+                if missing:
+                    fetched = self.index.fetch(ids=missing, namespace=self.namespace)
+                    for item in out:
+                        vector = fetched.vectors.get(item["id"])
+                        if vector:
+                            meta = vector.metadata or {}
+                            item.update({
+                                "text": meta.get("text", ""),
+                                "role": meta.get("role", ""),
+                                "timestamp": meta.get("created_at", ""),
+                                "pinned": bool(meta.get("pinned", False)),
+                                "is_summary": bool(meta.get("is_summary", False)),
+                                "importance": float(meta.get("importance", 0.5)),
+                                "metadata": meta,
+                            })
+                    out = [item for item in out if item.get("text")]
             except Exception as e:
-                logger.warning("Neural enhance failed, using raw ANN: %s", e)
+                logger.warning("Neural enhance failed, using raw ANN: %s", type(e).__name__)
                 out = out[:top_k]
         else:
             out = out[:top_k]
