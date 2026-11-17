@@ -40,7 +40,11 @@ class AgentHarness:
     ):
         self.session_id = session_id or f"session-{uuid.uuid4().hex[:8]}"
         self.pc = pc or Pinecone(api_key=settings.pinecone_api_key)
-        self.client = openai_client or OpenAI(api_key=settings.openai_api_key)
+        self.client = openai_client or OpenAI(
+            api_key=settings.openai_api_key,
+            timeout=settings.provider_timeout_s,
+            max_retries=settings.provider_max_retries,
+        )
         self.memory = memory or PineconeMemory(
             namespace=self.session_id, pc=self.pc, openai_client=self.client,
         )
