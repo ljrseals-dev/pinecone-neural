@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     api_port: int = Field(default=8000, ge=1, le=65535)
     redis_url: str = ""
     log_level: str = "INFO"
-    cors_origins: str = "*"  # comma-separated in production
+    cors_origins: str = ""  # optional explicit comma-separated origin allowlist
 
 
 settings = Settings()
