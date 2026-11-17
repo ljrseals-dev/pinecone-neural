@@ -111,7 +111,10 @@ class PineconeMemory:
                     region=settings.pinecone_region,
                 ),
             )
+            deadline = time.monotonic() + settings.pinecone_index_ready_timeout_s
             while not self.pc.describe_index(settings.pinecone_index).status["ready"]:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("Pinecone index did not become ready before the configured timeout")
                 time.sleep(2)
         return self.pc.Index(settings.pinecone_index)
 
@@ -142,6 +145,8 @@ class PineconeMemory:
             raise ValueError("importance must be between 0 and 1")
         importance = float(importance)
         clean = sanitize_untrusted(text)
+        if not clean:
+            raise ValueError("memory text is empty after sanitization")
         if len(clean) > 8000:
             clean = clean[:8000] + "…[truncated]"
 
@@ -231,7 +236,7 @@ class PineconeMemory:
         if not isinstance(top_k, int) or isinstance(top_k, bool) or not 1 <= top_k <= 100:
             raise ValueError("top_k must be between 1 and 100")
         # Over-fetch when neural reranking is active
-        fetch_k = top_k * 3 if (use_neural and self.neural) else top_k
+        fetch_k = min(100, top_k * 3) if (use_neural and self.neural) else top_k
 
         query_vector = self._embed(query)
         results = self.index.query(
@@ -271,6 +276,8 @@ class PineconeMemory:
                         vector = fetched.vectors.get(item["id"])
                         if vector:
                             meta = vector.metadata or {}
+                            if meta.get("deleted_at", ""):
+                                continue
                             item.update({
                                 "text": meta.get("text", ""),
                                 "role": meta.get("role", ""),
