@@ -104,15 +104,22 @@ class PineconeMemory:
         existing = [idx.name for idx in self.pc.list_indexes()]
         if settings.pinecone_index not in existing:
             logger.info("Creating Pinecone index %s", settings.pinecone_index)
-            self.pc.create_index(
-                name=settings.pinecone_index,
-                dimension=settings.embedding_dim,
-                metric="cosine",
-                spec=ServerlessSpec(
-                    cloud=settings.pinecone_cloud,
-                    region=settings.pinecone_region,
-                ),
-            )
+            try:
+                self.pc.create_index(
+                    name=settings.pinecone_index,
+                    dimension=settings.embedding_dim,
+                    metric="cosine",
+                    spec=ServerlessSpec(
+                        cloud=settings.pinecone_cloud,
+                        region=settings.pinecone_region,
+                    ),
+                )
+            except Exception:
+                # Another worker may have won the create race. Only suppress
+                # the error if the target index now exists.
+                refreshed = [idx.name for idx in self.pc.list_indexes()]
+                if settings.pinecone_index not in refreshed:
+                    raise
         deadline = time.monotonic() + settings.pinecone_index_ready_timeout_s
         description = self.pc.describe_index(settings.pinecone_index)
         while not description.status["ready"]:
