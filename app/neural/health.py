@@ -4,6 +4,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Dict
 
+from app.config import settings
+
 
 def _safe_size(path: Path) -> int:
     try:
@@ -24,9 +26,9 @@ def _safe_count(db: Path, table: str) -> int:
 
 
 def neural_health() -> Dict[str, Any]:
-    sidecar = Path(os.getenv("SIDECAR_DB", "data/vectors.db"))
-    syn = Path(os.getenv("SYNAPTIC_DB", "data/synapses.db"))
-    util = Path(os.getenv("UTILITY_MODEL_PATH", "data/utility_model.json"))
+    sidecar = Path(settings.sidecar_db)
+    syn = Path(settings.synaptic_db)
+    util = Path(settings.utility_model_path)
 
     return {
         "gnn": {
