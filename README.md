@@ -83,9 +83,9 @@ Reuse the returned `session_id` with the same API-key identity to continue the s
 ## Resource and security controls
 
 - Prior conversation history is replayed only for the authenticated user's session and is bounded to recent user/assistant turns.
-- Tool execution uses the configured `TOOL_TIMEOUT_S` and `TOOL_OUTPUT_MAX_BYTES` limits.
+- Tool execution uses the configured `TOOL_TIMEOUT_S` and `TOOL_OUTPUT_MAX_BYTES` limits; OpenAI requests have bounded `PROVIDER_TIMEOUT_S` and `PROVIDER_MAX_RETRIES`.
 - Each run tracks chat-completion and embedding tokens. `MAX_RUN_USD` uses configurable estimated rates: `LLM_INPUT_COST_PER_1M`, `LLM_OUTPUT_COST_PER_1M`, and `EMBEDDING_COST_PER_1M`. Keep these rates aligned with the active provider/model pricing; provider-side billing can differ from estimates.
-- Neural storage paths are configurable through `SIDECAR_DB`, `SYNAPTIC_DB`, and `UTILITY_MODEL_PATH`; the health endpoint reads those same paths. Soft-deleted vectors are purged after `SOFT_DELETE_RETENTION_DAYS`.
+- Neural storage paths are configurable through `SIDECAR_DB`, `SYNAPTIC_DB`, and `UTILITY_MODEL_PATH`; the health endpoint reads those same paths. Soft-deleted vectors are purged on a subsequent maintenance run after `SOFT_DELETE_RETENTION_DAYS`. Pruning/purge queries are bounded to 100 candidates per invocation.
 - The local runner defaults to loopback. Docker binds inside the container; publish it only to host loopback unless an authenticated reverse-proxy/TLS setup is deliberately configured.
 - Browser CORS is disabled by default. Set `CORS_ORIGINS` only to explicit trusted origins; wildcard origins are rejected.
 - GPT-6 Chat Completions requests use `reasoning_effort=none` and `max_completion_tokens`; legacy model overrides retain the legacy parameter path. Set the token-price environment variables to match the selected model.
