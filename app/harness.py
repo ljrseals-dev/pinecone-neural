@@ -175,7 +175,7 @@ class AgentHarness:
             raw = (response.choices[0].message.content or "").strip()
             usage = response.usage
             input_used = int(getattr(usage, "prompt_tokens", prompt_tokens) or prompt_tokens)
-            output_used = int(getattr(usage, "completion_tokens", 0) or 0)
+            output_used = int(getattr(usage, "completion_tokens", 0) or count_tokens(raw))
             self.tokens_used += input_used + output_used
             self.cost_usd += self._cost_for(input_used, output_used)
             messages.append({"role": "assistant", "content": raw[:12000]})
