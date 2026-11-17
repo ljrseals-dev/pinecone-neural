@@ -16,6 +16,7 @@ class FakeMemory:
         return 0
 
     def build_context(self, query, system_prompt):
+        self.embedding_tokens_used += 100
         return "[QUERY]\n" + query, {"total": 4}
 
     def recall(self, query, top_k=8):
