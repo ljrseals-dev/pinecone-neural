@@ -225,7 +225,9 @@ class PineconeMemory:
             "text": clean,
             "text_hash": hashlib.sha256(clean.encode()).hexdigest(),
             "created_at": now,
+            "created_at_epoch": time.time(),
             "observed_at": now,
+            "observed_at_epoch": time.time(),
             "importance": float(importance),
             "pinned": bool(pinned),
             "is_summary": False,
@@ -239,7 +241,8 @@ class PineconeMemory:
                 key: value for key, value in (metadata or {}).items()
                 if key not in {
                     "schema_version", "session_id", "role", "text", "text_hash",
-                    "created_at", "observed_at", "importance", "pinned",
+                    "created_at", "created_at_epoch", "observed_at", "observed_at_epoch",
+                    "importance", "pinned",
                     "is_summary", "parent_id", "summary_version", "access_count",
                     "last_accessed_at", "deleted_at", "provenance",
                 }
@@ -399,6 +402,7 @@ class PineconeMemory:
             namespace=self.namespace,
             set_metadata={
                 "deleted_at": utc_now(),
+                "deleted_at_epoch": time.time(),
                 "deleted_reason": reason,
             },
         )
@@ -417,7 +421,9 @@ class PineconeMemory:
             top_k=100,
             include_metadata=True,
             namespace=self.namespace,
-            filter={"deleted_at": {"$lt": cutoff}},
+            filter={
+                "deleted_at_epoch": {"$gt": 0.0, "$lt": datetime.fromisoformat(cutoff).timestamp()}
+            },
         )
         ids = [
             match.id for match in results.matches
@@ -447,9 +453,7 @@ class PineconeMemory:
         if not isinstance(utility_floor, (int, float)) or not 0.0 <= utility_floor <= 1.0:
             raise ValueError("utility_floor must be between 0 and 1")
         purged = self.purge_deleted()
-        cutoff = (
-            datetime.now(timezone.utc) - timedelta(days=age_days)
-        ).isoformat()
+        cutoff_epoch = time.time() - (age_days * 86400)
 
         # Practical bounded query (production should paginate with fetch_by_metadata)
         results = self.index.query(
@@ -457,7 +461,7 @@ class PineconeMemory:
             top_k=100,
             include_metadata=True,
             namespace=self.namespace,
-            filter={"created_at": {"$lt": cutoff}, "deleted_at": {"$eq": ""}},
+            filter={"created_at_epoch": {"$lt": cutoff_epoch}, "deleted_at_epoch": {"$eq": 0.0}},
         )
         deleted = purged
         for m in results.matches:
