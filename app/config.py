@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     pinecone_cloud: str = "aws"
     pinecone_region: str = "us-east-1"
     embedding_model: str = "text-embedding-3-small"
-    embedding_dim: int = 1536
+    embedding_dim: int = Field(default=1536, ge=1, le=20000)
     llm_model: str = "gpt-4o-mini"
     summarizer_model: str = "gpt-4o-mini"
 
