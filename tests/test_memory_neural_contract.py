@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 import asyncio
 
-from app.memory import PineconeMemory
+from app.memory import PineconeMemory, count_tokens
 from app.config import settings
 
 
@@ -150,5 +150,5 @@ def test_embedding_input_is_truncated_to_configured_token_limit(monkeypatch):
     memory.embedding_tokens_used = 0
 
     memory._embed("this input contains far more than two tokens")
-    assert len(memory.client.Embeddings.last_input.split()) <= 2
+    assert count_tokens(memory.client.Embeddings.last_input) <= 2
     assert memory.embedding_tokens_used == 3
