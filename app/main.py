@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from typing import Any, Dict, Optional
 
@@ -58,7 +59,8 @@ async def chat(
     history = await session_store.get(scoped_id) or []
     history.append({"role": "user", "content": req.message})
 
-    memory = PineconeMemory(
+    memory = await asyncio.to_thread(
+        PineconeMemory,
         namespace=f"user:{principal}:session:{session_id}",
         pc=pc,
         openai_client=openai_client,
