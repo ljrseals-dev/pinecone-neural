@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import math
 import re
 import time
 from datetime import datetime, timedelta, timezone
@@ -117,6 +118,15 @@ class PineconeMemory:
                 if time.monotonic() >= deadline:
                     raise TimeoutError("Pinecone index did not become ready before the configured timeout")
                 time.sleep(2)
+        description = self.pc.describe_index(settings.pinecone_index)
+        dimension = getattr(description, "dimension", None)
+        if dimension is not None and int(dimension) != settings.embedding_dim:
+            raise ValueError(
+                f"Pinecone index dimension {dimension} does not match configured embedding dimension {settings.embedding_dim}"
+            )
+        metric = getattr(description, "metric", None)
+        if metric is not None and metric != "cosine":
+            raise ValueError(f"Pinecone index metric must be cosine, not {metric}")
         return self.pc.Index(settings.pinecone_index)
 
     def _embed(self, text: str) -> List[float]:
@@ -126,7 +136,14 @@ class PineconeMemory:
         usage = getattr(resp, "usage", None)
         used = getattr(usage, "total_tokens", None)
         self.embedding_tokens_used = int(getattr(self, "embedding_tokens_used", 0)) + int(used if used is not None else count_tokens(text))
-        return resp.data[0].embedding
+        vector = list(resp.data[0].embedding)
+        if len(vector) != settings.embedding_dim:
+            raise ValueError(
+                f"Embedding dimension {len(vector)} does not match configured dimension {settings.embedding_dim}"
+            )
+        if not all(math.isfinite(float(value)) for value in vector):
+            raise ValueError("Embedding vector contains non-finite values")
+        return vector
 
     def remember(
         self,
