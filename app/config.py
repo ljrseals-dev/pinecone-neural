@@ -51,6 +51,8 @@ class Settings(BaseSettings):
     api_host: str = "127.0.0.1"
     api_port: int = Field(default=8000, ge=1, le=65535)
     redis_url: str = ""
+    redis_connect_timeout_s: float = Field(default=3.0, ge=0.1, le=30.0)
+    redis_socket_timeout_s: float = Field(default=5.0, ge=0.1, le=60.0)
     log_level: str = "INFO"
     cors_origins: str = ""  # optional explicit comma-separated origin allowlist
 
