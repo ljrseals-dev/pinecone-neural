@@ -126,12 +126,8 @@ class UtilityModel:
         Move predicted utilities toward the observed episode reward.
         Returns the MSE loss (0.0 if no torch).
         """
-        if self._net is None or not retrieved:
+        if not retrieved:
             return 0.0
-
-        import torch
-        import torch.nn as nn
-
         if not math.isfinite(float(reward)):
             raise ValueError("reward must be finite")
         reward = max(0.0, min(1.0, float(reward)))
@@ -140,6 +136,11 @@ class UtilityModel:
         ]
         if len(sims) != len(retrieved):
             raise ValueError("similarities and retrieved memories must have equal length")
+        if self._net is None:
+            return 0.0
+
+        import torch
+        import torch.nn as nn
         feats = torch.tensor(
             [self._features(s, m) for s, m in zip(sims, retrieved)],
             dtype=torch.float32,
