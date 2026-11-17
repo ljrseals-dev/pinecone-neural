@@ -1,5 +1,6 @@
 import asyncio
 import uuid
+from contextlib import asynccontextmanager
 from typing import Any, Dict, Optional
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -16,7 +17,17 @@ from app.config import settings
 from openai import OpenAI
 from pinecone import Pinecone
 
-app = FastAPI(title="Pinecone Neural Agent", version="2.5.0")
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    try:
+        yield
+    finally:
+        close = getattr(session_store, "close", None)
+        if close is not None:
+            await close()
+
+
+app = FastAPI(title="Pinecone Neural Agent", version="2.6.0", lifespan=lifespan)
 session_store: SessionStore = make_session_store()
 pc = Pinecone(api_key=settings.pinecone_api_key)
 openai_client = OpenAI(api_key=settings.openai_api_key)
@@ -39,7 +50,7 @@ class ChatResponse(BaseModel):
 
 @app.get("/health")
 def health() -> Dict[str, str]:
-    return {"status": "ok", "version": "2.5.0"}
+    return {"status": "ok", "version": "2.6.0"}
 
 
 @app.get("/health/neural")
