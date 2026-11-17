@@ -48,6 +48,18 @@ class NeuralRecallPipeline:
             except Exception as exc:
                 logger.warning("Synaptic remember failed: %s", type(exc).__name__)
 
+    def forget(self, memory_id: str) -> None:
+        if self.sidecar:
+            try:
+                self.sidecar.delete(memory_id)
+            except Exception as exc:
+                logger.warning("Sidecar delete failed: %s", type(exc).__name__)
+        if self.synaptic:
+            try:
+                self.synaptic.forget(memory_id)
+            except Exception as exc:
+                logger.warning("Synaptic delete failed: %s", type(exc).__name__)
+
     def on_coactivation(self, memory_ids: List[str], success: bool) -> None:
         if not self.synaptic or len(memory_ids) < 2:
             return
