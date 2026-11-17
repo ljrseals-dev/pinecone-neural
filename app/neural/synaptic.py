@@ -1,4 +1,5 @@
 """Synaptic associative memory: Hebbian edges + spreading activation."""
+import math
 import sqlite3
 import threading
 from datetime import datetime, timezone
