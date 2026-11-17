@@ -50,9 +50,7 @@ class MemoryStoreTool(Tool):
         self.memory = memory
 
     async def run(self, text: str, importance: float = 0.5) -> str:
-        mid = self.memory.remember(
-            text, role="fact", metadata={"importance": importance}
-        )
+        mid = self.memory.remember(text, role="fact", importance=importance)
         return f"Stored as {mid}"
 
 
