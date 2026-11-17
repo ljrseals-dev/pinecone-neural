@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from typing import Any, Dict, Optional
 
 from fastapi import Depends, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from app.auth import require_api_key
@@ -28,6 +29,17 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="Pinecone Neural Agent", version="2.6.0", lifespan=lifespan)
+if settings.cors_origins.strip():
+    origins = [origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()]
+    if not origins or "*" in origins:
+        raise ValueError("CORS_ORIGINS must be an explicit comma-separated origin allowlist")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "DELETE"],
+        allow_headers=["Content-Type", "Authorization", "X-API-Key"],
+    )
 session_store: SessionStore = make_session_store()
 pc = Pinecone(api_key=settings.pinecone_api_key)
 openai_client = OpenAI(api_key=settings.openai_api_key)
@@ -127,7 +139,7 @@ async def delete_session(
 def root():
     return {
         "name": "Pinecone Neural Agent",
-        "version": "2.5.0",
+        "version": "2.6.0",
         "docs": "/docs",
         "health": "/health",
         "auth": "X-API-Key or Authorization: Bearer required on agent endpoints",
