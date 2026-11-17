@@ -49,6 +49,8 @@ class AgentHarness:
         self.conversation_history = self._clean_history(conversation_history or [])
         self.seen_hashes: set[str] = set()
         self.tokens_used = 0
+        self.embedding_tokens_used = 0
+        self._embedding_tokens_seen = 0
         self.cost_usd = 0.0
         self.steps_taken = 0
         self._used_memory_ids: List[str] = []
@@ -80,6 +82,13 @@ class AgentHarness:
             + max(0, output_tokens) * settings.llm_output_cost_per_1m
         ) / 1_000_000.0
 
+    def _sync_embedding_usage(self) -> None:
+        current = int(getattr(self.memory, "embedding_tokens_used", 0))
+        delta = max(0, current - self._embedding_tokens_seen)
+        self._embedding_tokens_seen = current
+        self.embedding_tokens_used += delta
+        self.cost_usd += delta * settings.embedding_cost_per_1m / 1_000_000.0
+
     async def run(self, task: str, max_steps: Optional[int] = None) -> Dict[str, Any]:
         if not isinstance(task, str) or not task.strip() or len(task) > 12000:
             raise ValueError("task must be 1-12000 characters")
@@ -87,6 +96,10 @@ class AgentHarness:
         if not isinstance(max_steps, int) or isinstance(max_steps, bool) or not 1 <= max_steps <= 12:
             raise ValueError("max_steps must be between 1 and 12")
 
+        self.tokens_used = 0
+        self.embedding_tokens_used = 0
+        self._embedding_tokens_seen = 0
+        self.cost_usd = 0.0
         try:
             await asyncio.to_thread(self.memory.prune)
         except Exception as exc:
@@ -117,6 +130,7 @@ class AgentHarness:
                     "status": "context_overflow", "steps": 0, "tokens_used": 0,
                     "cost_usd": 0.0, "history_length": len(self.conversation_history),
                     "memories_used": 0}
+        self._sync_embedding_usage()
         messages.append({"role": "user", "content": context_prompt})
 
         final_answer: Optional[str] = None
@@ -125,7 +139,6 @@ class AgentHarness:
         self._used_metas = []
         self.seen_hashes = set()
         self.tokens_used = 0
-        self.cost_usd = 0.0
         self.steps_taken = 0
 
         for step in range(max_steps):
@@ -160,6 +173,21 @@ class AgentHarness:
                             self._used_metas.append(item)
             except Exception as exc:
                 logger.warning("Memory recall for feedback failed: %s", type(exc).__name__)
+            self._sync_embedding_usage()
+            remaining_cost = settings.max_run_usd - self.cost_usd
+            prompt_cost = self._cost_for(prompt_tokens, 0)
+            if remaining_cost <= prompt_cost:
+                status = "budget_exceeded"
+                break
+            if settings.llm_output_cost_per_1m > 0:
+                affordable_output = int(
+                    max(0.0, remaining_cost - prompt_cost)
+                    * 1_000_000 / settings.llm_output_cost_per_1m
+                )
+                completion_limit = min(completion_limit, affordable_output)
+            if completion_limit < 1:
+                status = "budget_exceeded"
+                break
 
             try:
                 response = self.client.chat.completions.create(
@@ -207,7 +235,8 @@ class AgentHarness:
                     continue
                 final_answer = sanitize_untrusted(answer[:12000])
                 await asyncio.to_thread(self.memory.remember, final_answer, role="assistant", importance=0.9, pinned=True)
-                status = "completed"
+                self._sync_embedding_usage()
+                status = "budget_exceeded" if self.cost_usd > settings.max_run_usd else "completed"
                 self._step_coactivation(step_memory_ids, success=True)
                 break
 
@@ -242,6 +271,11 @@ class AgentHarness:
             )
             messages.append({"role": "user", "content": f"Registered tool result ({name}):\n{safe_output[:3500]}"})
             self._step_coactivation(step_memory_ids, success=succeeded)
+            self._sync_embedding_usage()
+            if self.cost_usd > settings.max_run_usd:
+                status = "budget_exceeded"
+                final_answer = "Stopped because the configured run budget was reached."
+                break
 
         if final_answer is None:
             final_answer = "Agent reached its step or resource limit without a final answer."
@@ -263,6 +297,7 @@ class AgentHarness:
             "status": status,
             "steps": self.steps_taken,
             "tokens_used": self.tokens_used,
+            "embedding_tokens_used": self.embedding_tokens_used,
             "cost_usd": round(self.cost_usd, 8),
             "history_length": len(self.conversation_history),
             "memories_used": len(self._used_memory_ids),
