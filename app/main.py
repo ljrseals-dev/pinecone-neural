@@ -31,6 +31,8 @@ class ChatResponse(BaseModel):
     answer: str
     status: str = "ok"
     steps: int = 0
+    tokens_used: int = 0
+    cost_usd: float = 0.0
 
 
 @app.get("/health")
@@ -68,6 +70,7 @@ async def chat(
         openai_client=openai_client,
         memory=memory,
         tools=tools,
+        conversation_history=history[:-1],
     )
     try:
         result = await harness.run(req.message)
@@ -88,6 +91,8 @@ async def chat(
         answer=answer,
         status=result.get("status", "ok"),
         steps=result.get("steps", 0),
+        tokens_used=result.get("tokens_used", 0),
+        cost_usd=result.get("cost_usd", 0.0),
     )
 
 
