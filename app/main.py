@@ -43,7 +43,11 @@ if settings.cors_origins.strip():
     )
 session_store: SessionStore = make_session_store()
 pc = Pinecone(api_key=settings.pinecone_api_key)
-openai_client = OpenAI(api_key=settings.openai_api_key)
+openai_client = OpenAI(
+    api_key=settings.openai_api_key,
+    timeout=settings.provider_timeout_s,
+    max_retries=settings.provider_max_retries,
+)
 
 
 def build_namespace(principal: str, session_id: str) -> str:
