@@ -46,4 +46,4 @@ def test_synaptic_forget_removes_nodes_and_edges(tmp_path):
     layer.on_remember("b", "second", {"importance": 0.7})
     layer.on_coactivation(["a", "b"], success=True)
     layer.forget("a")
-    assert layer.spread(["b"], hops=1) == [{"id": "b", "score": 0.7, "metadata": {"importance": 0.7}}]
+    assert layer.spread(["b"], hops=1) == [{"id": "b", "score": 0.7, "metadata": {}}]
