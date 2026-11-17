@@ -50,9 +50,12 @@ class UtilityModel:
 
     def __init__(
         self,
-        model_path: str | Path = "data/utility_model.json",
+        model_path: str | Path | None = None,
         use_torch: bool = True,
     ):
+        if model_path is None:
+            from app.config import settings
+            model_path = settings.utility_model_path
         self.model_path = Path(model_path)
         self.model_path.parent.mkdir(parents=True, exist_ok=True)
         self._torch = None
@@ -84,13 +87,20 @@ class UtilityModel:
         similarity: float,
         meta: Dict[str, Any],
     ) -> List[float]:
-        return [
+        values = [
             float(similarity),
             float(meta.get("recency_days", 0.0)),
             float(meta.get("access_count", 0)),
             float(meta.get("importance", 0.5)),
             1.0 if meta.get("is_summary") else 0.0,
         ]
+        if not all(math.isfinite(value) for value in values):
+            raise ValueError("utility features must be finite")
+        values[0] = max(0.0, min(1.0, values[0]))
+        values[1] = max(0.0, values[1])
+        values[2] = max(0.0, values[2])
+        values[3] = max(0.0, min(1.0, values[3]))
+        return values
 
     def score(self, similarity: float, meta: Dict[str, Any]) -> float:
         if self._net is None:
@@ -122,7 +132,14 @@ class UtilityModel:
         import torch
         import torch.nn as nn
 
-        sims = similarities or [0.5] * len(retrieved)
+        if not math.isfinite(float(reward)):
+            raise ValueError("reward must be finite")
+        reward = max(0.0, min(1.0, float(reward)))
+        sims = list(similarities) if similarities is not None else [
+            float(item.get("score", 0.5)) for item in retrieved
+        ]
+        if len(sims) != len(retrieved):
+            raise ValueError("similarities and retrieved memories must have equal length")
         feats = torch.tensor(
             [self._features(s, m) for s, m in zip(sims, retrieved)],
             dtype=torch.float32,
