@@ -72,3 +72,28 @@ def test_remember_rejects_invalid_importance():
         pass
     else:
         raise AssertionError("non-finite importance must be rejected")
+
+
+class PreviouslyDeletedIndex(FakeIndex):
+    def fetch(self, ids, namespace):
+        return SimpleNamespace(vectors={
+            ids[0]: SimpleNamespace(metadata={
+                "deleted_at": "2026-01-01T00:00:00+00:00",
+                "access_count": 4,
+            })
+        })
+
+
+def test_remember_revives_previously_soft_deleted_content(monkeypatch):
+    monkeypatch.setattr(settings, "embedding_dim", 3)
+    memory = PineconeMemory.__new__(PineconeMemory)
+    memory.namespace = "user:operator:session:s1"
+    memory.index = PreviouslyDeletedIndex()
+    memory.client = FakeClient()
+    memory.neural = FakeNeural()
+    memory.embedding_tokens_used = 0
+
+    memory_id = memory.remember("safe content", role="fact", importance=0.8)
+    assert memory.index.saved["id"] == memory_id
+    assert memory.index.saved["metadata"]["deleted_at"] == ""
+    assert memory.index.saved["metadata"]["deleted_at_epoch"] == 0
