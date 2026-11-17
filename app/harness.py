@@ -98,7 +98,7 @@ class AgentHarness:
 
         self.tokens_used = 0
         self.embedding_tokens_used = 0
-        self._embedding_tokens_seen = 0
+        self._embedding_tokens_seen = int(getattr(self.memory, "embedding_tokens_used", 0))
         self.cost_usd = 0.0
         try:
             await asyncio.to_thread(self.memory.prune)
