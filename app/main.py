@@ -33,6 +33,7 @@ class ChatResponse(BaseModel):
     status: str = "ok"
     steps: int = 0
     tokens_used: int = 0
+    embedding_tokens_used: int = 0
     cost_usd: float = 0.0
 
 
@@ -56,7 +57,7 @@ async def chat(
     principal = str(user["user_id"])
     session_id = req.session_id or str(uuid.uuid4())
     scoped_id = f"{principal}:{session_id}"
-    history = await session_store.get(scoped_id) or []
+    history = (await session_store.get(scoped_id) or [])[-40:]
     history.append({"role": "user", "content": req.message})
 
     memory = await asyncio.to_thread(
@@ -94,6 +95,7 @@ async def chat(
         status=result.get("status", "ok"),
         steps=result.get("steps", 0),
         tokens_used=result.get("tokens_used", 0),
+        embedding_tokens_used=result.get("embedding_tokens_used", 0),
         cost_usd=result.get("cost_usd", 0.0),
     )
 
