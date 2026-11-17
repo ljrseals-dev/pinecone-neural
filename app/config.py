@@ -45,8 +45,9 @@ class Settings(BaseSettings):
 
     # API
     api_keys: str = ""
-    api_host: str = "0.0.0.0"
-    api_port: int = 8000
+    api_host: str = "127.0.0.1"
+    api_port: int = Field(default=8000, ge=1, le=65535)
+    redis_url: str = ""
     log_level: str = "INFO"
     cors_origins: str = "*"  # comma-separated in production
 
