@@ -88,6 +88,8 @@ def gnn_score_diffusion(
 
     # 6. One-hop diffusion
     s1 = alpha * (P @ s0) + (1.0 - alpha) * s0
+    isolated = row_sums.reshape(-1) <= 1e-8
+    s1[isolated] = s0[isolated]
 
     # 7. Write back and sort
     for i, c in enumerate(candidates):
