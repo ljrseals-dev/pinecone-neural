@@ -93,6 +93,7 @@ class PineconeMemory:
         self.namespace = namespace
         self.pc = pc
         self.client = openai_client
+        self.embedding_tokens_used = 0
         self.index = self._ensure_index()
         self.neural = neural
         if enable_neural and NEURAL_AVAILABLE and self.neural is None:
@@ -122,6 +123,9 @@ class PineconeMemory:
         resp = self.client.embeddings.create(
             model=settings.embedding_model, input=text
         )
+        usage = getattr(resp, "usage", None)
+        used = getattr(usage, "total_tokens", None)
+        self.embedding_tokens_used += int(used if used is not None else count_tokens(text))
         return resp.data[0].embedding
 
     def remember(
