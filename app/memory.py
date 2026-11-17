@@ -494,7 +494,10 @@ class PineconeMemory:
             include_metadata=True,
             namespace=self.namespace,
             filter={
-                "deleted_at_epoch": {"$gt": 0.0, "$lt": datetime.fromisoformat(cutoff).timestamp()}
+                "$and": [
+                    {"deleted_at_epoch": {"$gt": 0.0}},
+                    {"deleted_at_epoch": {"$lt": datetime.fromisoformat(cutoff).timestamp()}},
+                ]
             },
         )
         cutoff_epoch = datetime.fromisoformat(cutoff).timestamp()
