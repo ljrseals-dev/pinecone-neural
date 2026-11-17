@@ -1,5 +1,4 @@
 """Synaptic associative memory: Hebbian edges + spreading activation."""
-import os
 import sqlite3
 import threading
 from datetime import datetime, timezone
@@ -9,7 +8,10 @@ from typing import Any, Dict, List
 
 class SynapticLayer:
     def __init__(self, db_path: str | None = None):
-        self.db_path = Path(db_path or os.getenv("SYNAPTIC_DB", "data/synapses.db"))
+        if db_path is None:
+            from app.config import settings
+            db_path = settings.synaptic_db
+        self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._local = threading.local()
         self._init_schema()
