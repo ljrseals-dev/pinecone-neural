@@ -1,8 +1,12 @@
+import asyncio
+import hashlib
 import uuid
+from contextlib import asynccontextmanager
 from typing import Any, Dict, Optional
 
 from fastapi import Depends, FastAPI, HTTPException
-from pydantic import BaseModel, Field
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.auth import require_api_key
 from app.harness import AgentHarness
@@ -15,13 +19,47 @@ from app.config import settings
 from openai import OpenAI
 from pinecone import Pinecone
 
-app = FastAPI(title="Pinecone Neural Agent", version="2.5.0")
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    try:
+        yield
+    finally:
+        close = getattr(session_store, "close", None)
+        if close is not None:
+            await close()
+
+
+app = FastAPI(title="Pinecone Neural Agent", version="2.6.0", lifespan=lifespan)
+if settings.cors_origins.strip():
+    origins = [origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()]
+    if not origins or "*" in origins:
+        raise ValueError("CORS_ORIGINS must be an explicit comma-separated origin allowlist")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "DELETE"],
+        allow_headers=["Content-Type", "Authorization", "X-API-Key"],
+    )
 session_store: SessionStore = make_session_store()
 pc = Pinecone(api_key=settings.pinecone_api_key)
-openai_client = OpenAI(api_key=settings.openai_api_key)
+openai_client = OpenAI(
+    api_key=settings.openai_api_key,
+    timeout=settings.provider_timeout_s,
+    max_retries=settings.provider_max_retries,
+)
+
+
+def build_namespace(principal: str, session_id: str) -> str:
+    raw = f"user:{principal}:session:{session_id}"
+    if len(raw.encode("utf-8")) <= 64:
+        return raw
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    return "u-" + digest[:62]
 
 
 class ChatRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     message: str = Field(min_length=1, max_length=12000)
     session_id: Optional[str] = Field(default=None, min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
 
@@ -31,11 +69,14 @@ class ChatResponse(BaseModel):
     answer: str
     status: str = "ok"
     steps: int = 0
+    tokens_used: int = 0
+    embedding_tokens_used: int = 0
+    cost_usd: float = 0.0
 
 
 @app.get("/health")
 def health() -> Dict[str, str]:
-    return {"status": "ok", "version": "2.5.0"}
+    return {"status": "ok", "version": "2.6.0"}
 
 
 @app.get("/health/neural")
@@ -53,11 +94,12 @@ async def chat(
     principal = str(user["user_id"])
     session_id = req.session_id or str(uuid.uuid4())
     scoped_id = f"{principal}:{session_id}"
-    history = await session_store.get(scoped_id) or []
+    history = (await session_store.get(scoped_id) or [])[-40:]
     history.append({"role": "user", "content": req.message})
 
-    memory = PineconeMemory(
-        namespace=f"user:{principal}:session:{session_id}",
+    memory = await asyncio.to_thread(
+        PineconeMemory,
+        namespace=build_namespace(principal, session_id),
         pc=pc,
         openai_client=openai_client,
     )
@@ -68,6 +110,7 @@ async def chat(
         openai_client=openai_client,
         memory=memory,
         tools=tools,
+        conversation_history=history[:-1],
     )
     try:
         result = await harness.run(req.message)
@@ -88,6 +131,9 @@ async def chat(
         answer=answer,
         status=result.get("status", "ok"),
         steps=result.get("steps", 0),
+        tokens_used=result.get("tokens_used", 0),
+        embedding_tokens_used=result.get("embedding_tokens_used", 0),
+        cost_usd=result.get("cost_usd", 0.0),
     )
 
 
@@ -107,7 +153,7 @@ async def delete_session(
 def root():
     return {
         "name": "Pinecone Neural Agent",
-        "version": "2.5.0",
+        "version": "2.6.0",
         "docs": "/docs",
         "health": "/health",
         "auth": "X-API-Key or Authorization: Bearer required on agent endpoints",

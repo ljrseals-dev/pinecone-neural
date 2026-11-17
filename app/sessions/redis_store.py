@@ -3,14 +3,18 @@ from typing import Optional, List, Dict, Any
 
 import redis.asyncio as redis
 
+from app.config import settings
 from app.sessions.base import SessionStore
 
 
 class RedisSessionStore(SessionStore):
     def __init__(self, url: str, prefix: str = "sess:", pool_size: int = 20) -> None:
         self.client = redis.from_url(
-            url, decode_responses=True,
+            url,
+            decode_responses=True,
             max_connections=pool_size,
+            socket_connect_timeout=settings.redis_connect_timeout_s,
+            socket_timeout=settings.redis_socket_timeout_s,
         )
         self.prefix = prefix
 

@@ -33,3 +33,17 @@ def test_duplicate_api_key_is_rejected(monkeypatch):
     monkeypatch.setenv("API_KEYS", f"{key}:one,{key}:two")
     with pytest.raises(ValueError):
         APIKeyStore()
+
+
+def test_api_key_length_is_bounded(monkeypatch):
+    monkeypatch.setenv("API_KEYS", ("x" * 257) + ":operator")
+    with pytest.raises(ValueError):
+        APIKeyStore()
+
+
+def test_non_ascii_and_oversized_supplied_keys_fail_closed(monkeypatch):
+    key = "K" * 40
+    monkeypatch.setenv("API_KEYS", f"{key}:operator")
+    store = APIKeyStore()
+    assert store.validate("ñ" * 40) is None
+    assert store.validate("x" * 257) is None

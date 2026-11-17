@@ -1,4 +1,5 @@
 import ast
+import asyncio
 import json
 import math
 import operator
@@ -23,7 +24,7 @@ class MemorySearchTool(Tool):
         self.memory = memory
 
     async def run(self, query: str, top_k: int = 5) -> str:
-        results = self.memory.recall(query, top_k=top_k)
+        results = await asyncio.to_thread(self.memory.recall, query, top_k=top_k)
         return json.dumps([
             {
                 "id": r.get("id"),
@@ -50,9 +51,7 @@ class MemoryStoreTool(Tool):
         self.memory = memory
 
     async def run(self, text: str, importance: float = 0.5) -> str:
-        mid = self.memory.remember(
-            text, role="fact", metadata={"importance": importance}
-        )
+        mid = await asyncio.to_thread(self.memory.remember, text, role="fact", importance=importance)
         return f"Stored as {mid}"
 
 
@@ -108,7 +107,8 @@ class CalculatorTool(Tool):
 
 def build_default_registry(memory: Any) -> "ToolRegistry":
     from app.tools.registry import ToolRegistry
-    registry = ToolRegistry()
+    from app.config import settings
+    registry = ToolRegistry(timeout_s=settings.tool_timeout_s, output_max_bytes=settings.tool_output_max_bytes)
     registry.register(MemorySearchTool(memory))
     registry.register(MemoryStoreTool(memory))
     registry.register(CalculatorTool())

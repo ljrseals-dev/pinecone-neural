@@ -7,4 +7,4 @@ if [ ! -f .env ]; then
 fi
 
 export PYTHONPATH=.
-exec uvicorn app.main:app --host "${API_HOST:-127.0.0.1}" --port "${API_PORT:-8000}"
+exec python -c 'from app.config import settings; import uvicorn; uvicorn.run("app.main:app", host=settings.api_host, port=settings.api_port, log_level=settings.log_level.lower())'

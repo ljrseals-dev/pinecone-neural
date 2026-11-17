@@ -7,9 +7,10 @@ from app.tools.base import Tool
 
 
 class ToolRegistry:
-    def __init__(self, timeout_s: float = 10.0) -> None:
+    def __init__(self, timeout_s: float = 2.0, output_max_bytes: int = 4096) -> None:
         self._tools: Dict[str, Tool] = {}
         self.timeout_s = max(0.1, min(float(timeout_s), 60.0))
+        self.output_max_bytes = max(128, min(int(output_max_bytes), 1_048_576))
 
     def register(self, tool: Tool) -> None:
         if not isinstance(tool.name, str) or not tool.name or tool.name in self._tools:
@@ -81,6 +82,9 @@ class ToolRegistry:
         if not isinstance(result, str):
             result = json.dumps(result, default=str)
         encoded = result.encode("utf-8")
-        if len(encoded) > 4096:
-            result = encoded[:4096].decode("utf-8", errors="ignore") + "…[truncated]"
+        if len(encoded) > self.output_max_bytes:
+            suffix = "…[truncated]"
+            suffix_bytes = len(suffix.encode("utf-8"))
+            prefix_limit = max(0, self.output_max_bytes - suffix_bytes)
+            result = encoded[:prefix_limit].decode("utf-8", errors="ignore") + suffix
         return result
