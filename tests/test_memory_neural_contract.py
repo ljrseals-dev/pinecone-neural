@@ -21,8 +21,11 @@ class FakeIndex:
 
 class FakeClient:
     class Embeddings:
+        last_input = None
+
         @staticmethod
         def create(**kwargs):
+            FakeClient.Embeddings.last_input = kwargs["input"]
             return SimpleNamespace(data=[SimpleNamespace(embedding=[0.1, 0.2, 0.3])], usage=SimpleNamespace(total_tokens=3))
 
     embeddings = Embeddings()
@@ -137,3 +140,15 @@ def test_idempotent_remember_repairs_neural_sidecar_and_legacy_metadata(monkeypa
     assert memory.neural.args[0] == memory_id
     assert memory.neural.args[1] == [0.1, 0.2, 0.3]
     assert memory.embedding_tokens_used == 0
+
+
+def test_embedding_input_is_truncated_to_configured_token_limit(monkeypatch):
+    monkeypatch.setattr(settings, "embedding_dim", 3)
+    monkeypatch.setattr(settings, "max_embedding_tokens", 2)
+    memory = PineconeMemory.__new__(PineconeMemory)
+    memory.client = FakeClient()
+    memory.embedding_tokens_used = 0
+
+    memory._embed("this input contains far more than two tokens")
+    assert len(memory.client.Embeddings.last_input.split()) <= 2
+    assert memory.embedding_tokens_used == 3
