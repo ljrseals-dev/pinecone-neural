@@ -1,5 +1,7 @@
+import ast
 import json
-import re
+import math
+import operator
 from typing import Any
 
 from app.tools.base import Tool
@@ -7,12 +9,12 @@ from app.tools.base import Tool
 
 class MemorySearchTool(Tool):
     name = "memory_search"
-    description = "Search Pinecone memory. Returns top-k matches with id, score, text."
+    description = "Search this authenticated session's Pinecone memory."
     parameters = {
         "type": "object",
         "properties": {
-            "query": {"type": "string"},
-            "top_k": {"type": "integer"},
+            "query": {"type": "string", "minLength": 1, "maxLength": 2000},
+            "top_k": {"type": "integer", "minimum": 1, "maximum": 20},
         },
         "required": ["query"],
     }
@@ -21,7 +23,6 @@ class MemorySearchTool(Tool):
         self.memory = memory
 
     async def run(self, query: str, top_k: int = 5) -> str:
-        top_k = max(1, min(int(top_k), 20))
         results = self.memory.recall(query, top_k=top_k)
         return json.dumps([
             {
@@ -35,12 +36,12 @@ class MemorySearchTool(Tool):
 
 class MemoryStoreTool(Tool):
     name = "memory_store"
-    description = "Store a fact in memory for later retrieval."
+    description = "Store a fact in this authenticated session's memory."
     parameters = {
         "type": "object",
         "properties": {
-            "text": {"type": "string"},
-            "importance": {"type": "number"},
+            "text": {"type": "string", "minLength": 1, "maxLength": 4000},
+            "importance": {"type": "number", "minimum": 0.0, "maximum": 1.0},
         },
         "required": ["text"],
     }
@@ -49,7 +50,6 @@ class MemoryStoreTool(Tool):
         self.memory = memory
 
     async def run(self, text: str, importance: float = 0.5) -> str:
-        importance = max(0.0, min(float(importance), 1.0))
         mid = self.memory.remember(
             text, role="fact", metadata={"importance": importance}
         )
@@ -58,27 +58,58 @@ class MemoryStoreTool(Tool):
 
 class CalculatorTool(Tool):
     name = "calculator"
-    description = "Evaluate a simple arithmetic expression (digits, +-*/(). only)."
+    description = "Evaluate bounded arithmetic without Python eval or code execution."
     parameters = {
         "type": "object",
-        "properties": {"expression": {"type": "string"}},
+        "properties": {"expression": {"type": "string", "minLength": 1, "maxLength": 200}},
         "required": ["expression"],
     }
 
+    _binary = {
+        ast.Add: operator.add,
+        ast.Sub: operator.sub,
+        ast.Mult: operator.mul,
+        ast.Div: operator.truediv,
+        ast.FloorDiv: operator.floordiv,
+        ast.Mod: operator.mod,
+        ast.Pow: operator.pow,
+    }
+    _unary = {ast.UAdd: operator.pos, ast.USub: operator.neg}
+
+    @classmethod
+    def _evaluate(cls, node: ast.AST) -> float:
+        if isinstance(node, ast.Expression):
+            return cls._evaluate(node.body)
+        if isinstance(node, ast.Constant) and type(node.value) in (int, float):
+            value = node.value
+        elif isinstance(node, ast.UnaryOp) and type(node.op) in cls._unary:
+            value = cls._unary[type(node.op)](cls._evaluate(node.operand))
+        elif isinstance(node, ast.BinOp) and type(node.op) in cls._binary:
+            left = cls._evaluate(node.left)
+            right = cls._evaluate(node.right)
+            if type(node.op) is ast.Pow and (abs(right) > 8 or abs(left) > 1000):
+                raise ValueError("exponentiation exceeds calculator limits")
+            value = cls._binary[type(node.op)](left, right)
+        else:
+            raise ValueError("unsupported expression")
+        if not isinstance(value, (int, float)) or not math.isfinite(value) or abs(value) > 1e12:
+            raise ValueError("result exceeds calculator limits")
+        return value
+
     async def run(self, expression: str) -> str:
-        if not re.fullmatch(r"[\d\s+\-*/().]{1,200}", expression):
-            return "ToolError: expression contains forbidden characters"
         try:
-            result = eval(expression, {"__builtins__": {}}, {})  # noqa: S307
-            return str(result)
-        except Exception as e:
-            return f"ToolError: {e}"
+            tree = ast.parse(expression, mode="eval")
+            if sum(1 for _ in ast.walk(tree)) > 32:
+                return "ToolError: expression is too complex"
+            return str(self._evaluate(tree))
+        except (SyntaxError, ValueError, ZeroDivisionError, OverflowError) as exc:
+            return f"ToolError: {type(exc).__name__}: invalid arithmetic expression"
 
 
 def build_default_registry(memory: Any) -> "ToolRegistry":
     from app.tools.registry import ToolRegistry
-    reg = ToolRegistry()
-    reg.register(MemorySearchTool(memory))
-    reg.register(MemoryStoreTool(memory))
-    reg.register(CalculatorTool())
-    return reg
+    registry = ToolRegistry()
+    registry.register(MemorySearchTool(memory))
+    registry.register(MemoryStoreTool(memory))
+    registry.register(CalculatorTool())
+    return registry
