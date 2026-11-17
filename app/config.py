@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     # with the selected provider/model pricing before enabling cost limits.
     llm_input_cost_per_1m: float = Field(default=0.15, ge=0.0, le=10000.0)
     llm_output_cost_per_1m: float = Field(default=0.60, ge=0.0, le=10000.0)
+    embedding_cost_per_1m: float = Field(default=0.02, ge=0.0, le=10000.0)
     tool_timeout_s: float = Field(default=2.0, gt=0.0, le=60.0)
     tool_output_max_bytes: int = Field(default=4096, ge=128, le=1048576)
     utility_model_path: str = "data/utility_model.json"
