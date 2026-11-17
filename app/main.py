@@ -16,17 +16,24 @@ from app.sessions import make_session_store
 from app.sessions.base import SessionStore
 from app.tools import build_default_registry
 from app.config import settings
-from openai import OpenAI
+from openai import AsyncOpenAI, OpenAI
 from pinecone import Pinecone
+from app.runtime_limits import SessionLockPool, run_semaphore
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     try:
         yield
     finally:
-        close = getattr(session_store, "close", None)
-        if close is not None:
-            await close()
+        try:
+            close = getattr(session_store, "close", None)
+            if close is not None:
+                await close()
+        finally:
+            try:
+                await async_openai_client.close()
+            finally:
+                await asyncio.to_thread(openai_client.close)
 
 
 app = FastAPI(title="Pinecone Neural Agent", version="2.6.0", lifespan=lifespan)
@@ -48,6 +55,12 @@ openai_client = OpenAI(
     timeout=settings.provider_timeout_s,
     max_retries=settings.provider_max_retries,
 )
+async_openai_client = AsyncOpenAI(
+    api_key=settings.openai_api_key,
+    timeout=settings.provider_timeout_s,
+    max_retries=settings.provider_max_retries,
+)
+session_locks = SessionLockPool()
 
 
 def build_namespace(principal: str, session_id: str) -> str:
@@ -89,52 +102,58 @@ async def chat(
     req: ChatRequest,
     user: Dict[str, Any] = Depends(require_api_key),
 ) -> ChatResponse:
-    # Session IDs are scoped to the authenticated principal; one API-key user
-    # cannot address another user's Redis history or Pinecone namespace.
+    # Session IDs are scoped to the authenticated principal. Serialize the
+    # complete read-run-write transaction to prevent lost history updates.
     principal = str(user["user_id"])
     session_id = req.session_id or str(uuid.uuid4())
     scoped_id = f"{principal}:{session_id}"
-    history = (await session_store.get(scoped_id) or [])[-40:]
-    history.append({"role": "user", "content": req.message})
 
-    memory = await asyncio.to_thread(
-        PineconeMemory,
-        namespace=build_namespace(principal, session_id),
-        pc=pc,
-        openai_client=openai_client,
-    )
-    tools = build_default_registry(memory)
-    harness = AgentHarness(
-        session_id=session_id,
-        pc=pc,
-        openai_client=openai_client,
-        memory=memory,
-        tools=tools,
-        conversation_history=history[:-1],
-    )
-    try:
-        result = await harness.run(req.message)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except Exception:
-        # Do not disclose API credentials, provider errors, or stack details.
-        raise HTTPException(status_code=500, detail="Agent request failed; inspect protected server logs.")
+    async with session_locks.hold(scoped_id):
+        async with run_semaphore:
+            history = (await session_store.get(scoped_id) or [])[-40:]
+            history.append({"role": "user", "content": req.message})
+            try:
+                memory = await asyncio.to_thread(
+                    PineconeMemory,
+                    namespace=build_namespace(principal, session_id),
+                    pc=pc,
+                    openai_client=openai_client,
+                )
+                tools = build_default_registry(memory)
+                harness = AgentHarness(
+                    session_id=session_id,
+                    pc=pc,
+                    openai_client=openai_client,
+                    async_openai_client=async_openai_client,
+                    memory=memory,
+                    tools=tools,
+                    conversation_history=history[:-1],
+                )
+                result = await harness.run(req.message)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            except Exception:
+                # Do not disclose API credentials, provider errors, or stack details.
+                raise HTTPException(
+                    status_code=500,
+                    detail="Agent request failed; inspect protected server logs.",
+                )
 
-    answer = result.get("answer", "")
-    await session_store.set(
-        scoped_id,
-        history + [{"role": "assistant", "content": answer}],
-        ttl=86400,
-    )
-    return ChatResponse(
-        session_id=session_id,
-        answer=answer,
-        status=result.get("status", "ok"),
-        steps=result.get("steps", 0),
-        tokens_used=result.get("tokens_used", 0),
-        embedding_tokens_used=result.get("embedding_tokens_used", 0),
-        cost_usd=result.get("cost_usd", 0.0),
-    )
+            answer = result.get("answer", "")
+            await session_store.set(
+                scoped_id,
+                (history + [{"role": "assistant", "content": answer}])[-40:],
+                ttl=86400,
+            )
+            return ChatResponse(
+                session_id=session_id,
+                answer=answer,
+                status=result.get("status", "ok"),
+                steps=result.get("steps", 0),
+                tokens_used=result.get("tokens_used", 0),
+                embedding_tokens_used=result.get("embedding_tokens_used", 0),
+                cost_usd=result.get("cost_usd", 0.0),
+            )
 
 
 @app.delete("/sessions/{session_id}")
@@ -145,7 +164,8 @@ async def delete_session(
     if not session_id or len(session_id) > 64 or not all(c.isalnum() or c in "_-" for c in session_id):
         raise HTTPException(status_code=422, detail="Invalid session ID")
     scoped_id = f"{user['user_id']}:{session_id}"
-    await session_store.delete(scoped_id)
+    async with session_locks.hold(scoped_id):
+        await session_store.delete(scoped_id)
     return {"deleted": session_id}
 
 

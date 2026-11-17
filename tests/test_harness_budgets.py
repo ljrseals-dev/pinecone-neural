@@ -44,7 +44,8 @@ class FakeCompletions:
         self.last_kwargs = None
         self.calls = 0
 
-    def create(self, **kwargs):
+    async def create(self, **kwargs):
+        await asyncio.sleep(0.02)
         self.calls += 1
         self.last_messages = kwargs["messages"]
         self.last_kwargs = kwargs
@@ -98,3 +99,24 @@ def test_harness_stops_before_provider_call_when_cost_budget_is_exhausted(monkey
     result = asyncio.run(harness.run("current question"))
     assert result["status"] == "budget_exceeded"
     assert harness.client.chat.completions.calls == 0
+
+
+
+def test_async_completion_keeps_event_loop_responsive(monkeypatch):
+    monkeypatch.setattr(settings, "max_run_tokens", 10000)
+    monkeypatch.setattr(settings, "max_run_usd", 1.0)
+    harness = make_harness('{"type":"final_answer","answer":"done"}')
+
+    async def exercise():
+        ticks = 0
+
+        async def heartbeat():
+            nonlocal ticks
+            for _ in range(5):
+                await asyncio.sleep(0.005)
+                ticks += 1
+
+        await asyncio.gather(harness.run("current question"), heartbeat())
+        return ticks
+
+    assert asyncio.run(exercise()) == 5

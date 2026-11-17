@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     soft_delete_retention_days: int = Field(default=14, ge=0, le=3650)
 
     max_steps: int = Field(default=6, ge=1, le=12)
+    max_concurrent_runs: int = Field(default=8, ge=1, le=128)
     max_run_tokens: int = Field(default=50_000, ge=256, le=2_000_000)
     max_run_usd: float = Field(default=0.25, gt=0.0, le=100.0)
     # Configurable estimate rates in USD per 1M tokens. Keep these aligned

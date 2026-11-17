@@ -11,7 +11,7 @@ import logging
 import uuid
 from typing import Any, Dict, List, Optional
 
-from openai import OpenAI
+from openai import AsyncOpenAI, OpenAI
 from pinecone import Pinecone
 
 from app.config import settings
@@ -34,19 +34,25 @@ class AgentHarness:
         session_id: Optional[str] = None,
         pc: Optional[Pinecone] = None,
         openai_client: Optional[OpenAI] = None,
+        async_openai_client: Optional[AsyncOpenAI] = None,
         memory: Optional[PineconeMemory] = None,
         tools: Optional[ToolRegistry] = None,
         conversation_history: Optional[List[Dict[str, str]]] = None,
     ):
         self.session_id = session_id or f"session-{uuid.uuid4().hex[:8]}"
         self.pc = pc or Pinecone(api_key=settings.pinecone_api_key)
-        self.client = openai_client or OpenAI(
+        self.embedding_client = openai_client or OpenAI(
+            api_key=settings.openai_api_key,
+            timeout=settings.provider_timeout_s,
+            max_retries=settings.provider_max_retries,
+        )
+        self.client = async_openai_client or AsyncOpenAI(
             api_key=settings.openai_api_key,
             timeout=settings.provider_timeout_s,
             max_retries=settings.provider_max_retries,
         )
         self.memory = memory or PineconeMemory(
-            namespace=self.session_id, pc=self.pc, openai_client=self.client,
+            namespace=self.session_id, pc=self.pc, openai_client=self.embedding_client,
         )
         self.tools = tools or build_default_registry(self.memory)
         self.conversation_history = self._clean_history(conversation_history or [])
@@ -208,7 +214,7 @@ class AgentHarness:
                 else:
                     request_args["temperature"] = 0.2
                     request_args["max_tokens"] = completion_limit
-                response = self.client.chat.completions.create(**request_args)
+                response = await self.client.chat.completions.create(**request_args)
             except Exception:
                 logger.exception("LLM call failed")
                 status = "llm_error"
