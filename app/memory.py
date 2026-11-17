@@ -186,15 +186,17 @@ class PineconeMemory:
         existing = self.index.fetch(ids=[vid], namespace=self.namespace)
         if existing.vectors:
             meta = existing.vectors[vid].metadata or {}
-            self.index.update(
-                id=vid,
-                namespace=self.namespace,
-                set_metadata={
-                    "access_count": int(meta.get("access_count", 0)) + 1,
-                    "last_accessed_at": now,
-                },
-            )
-            return vid
+            if not meta.get("deleted_at"):
+                self.index.update(
+                    id=vid,
+                    namespace=self.namespace,
+                    set_metadata={
+                        "access_count": int(meta.get("access_count", 0)) + 1,
+                        "last_accessed_at": now,
+                    },
+                )
+                return vid
+            # Re-remembering a soft-deleted item must revive it through upsert.
 
         emb = self._embed(clean)
 
