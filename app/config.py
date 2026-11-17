@@ -25,8 +25,8 @@ class Settings(BaseSettings):
 
     max_context_tokens: int = Field(default=3500, ge=256, le=32000)
     summary_token_limit: int = Field(default=200, ge=32, le=4000)
-    prune_age_days: int = 7
-    prune_utility_floor: float = 0.15
+    prune_age_days: int = Field(default=7, ge=0, le=36500)
+    prune_utility_floor: float = Field(default=0.15, ge=0.0, le=1.0)
     soft_delete_retention_days: int = Field(default=14, ge=0, le=3650)
 
     max_steps: int = Field(default=6, ge=1, le=12)
