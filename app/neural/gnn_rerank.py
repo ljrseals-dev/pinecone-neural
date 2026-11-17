@@ -36,6 +36,10 @@ def gnn_score_diffusion(
     -------
     Reranked list (same dicts, with added "diffused_score"), sorted descending.
     """
+    if not 0.0 <= alpha <= 1.0:
+        raise ValueError("alpha must be between 0 and 1")
+    if not isinstance(k_graph, int) or isinstance(k_graph, bool) or k_graph < 1:
+        raise ValueError("k_graph must be a positive integer")
     n = len(candidates)
     if n < 3:
         for c in candidates:
@@ -44,6 +48,11 @@ def gnn_score_diffusion(
 
     # 1. Stack full-precision vectors
     V = np.asarray([c["vector"] for c in candidates], dtype=np.float32)
+    if V.ndim != 2 or V.shape[1] == 0 or not np.isfinite(V).all():
+        raise ValueError("candidate vectors must be finite and have matching dimensions")
+    scores = np.asarray([float(c.get("score", 0.0)) for c in candidates], dtype=np.float32)
+    if not np.isfinite(scores).all():
+        raise ValueError("candidate scores must be finite")
     norms = np.linalg.norm(V, axis=1, keepdims=True) + 1e-8
     V_norm = V / norms
 
@@ -70,7 +79,7 @@ def gnn_score_diffusion(
     P = np.divide(adj, row_sums, out=np.zeros_like(adj), where=row_sums > 1e-8)
 
     # 5. Initial scores (min-max normalized)
-    s0 = np.array([float(c.get("score", 0.0)) for c in candidates], dtype=np.float32)
+    s0 = scores
     s_min, s_max = s0.min(), s0.max()
     if s_max - s_min > 1e-8:
         s0 = (s0 - s_min) / (s_max - s_min)
