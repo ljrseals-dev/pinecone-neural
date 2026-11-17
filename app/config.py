@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     pinecone_region: str = "us-east-1"
     embedding_model: str = "text-embedding-3-small"
     embedding_dim: int = Field(default=1536, ge=1, le=20000)
+    max_embedding_tokens: int = Field(default=8000, ge=1, le=8191)
     llm_model: str = "gpt-6-luna"
     summarizer_model: str = "gpt-6-luna"
 
