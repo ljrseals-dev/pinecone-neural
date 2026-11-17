@@ -56,12 +56,18 @@ def gnn_score_diffusion(
     for i in range(n):
         row = sim_matrix[i].copy()
         row[i] = -np.inf
-        top_idx = np.argpartition(row, -k)[-k:]
-        adj[i, top_idx] = row[top_idx]
+        # Negative cosine edges destabilize row normalization. Only positive
+        # similarity contributes; zero-neighbor rows retain their original score.
+        positive = np.maximum(row, 0.0)
+        if not np.any(positive > 0):
+            continue
+        top_idx = np.argpartition(positive, -k)[-k:]
+        top_idx = top_idx[positive[top_idx] > 0]
+        adj[i, top_idx] = positive[top_idx]
 
     # 4. Row-normalize → transition matrix
-    row_sums = adj.sum(axis=1, keepdims=True) + 1e-8
-    P = adj / row_sums
+    row_sums = adj.sum(axis=1, keepdims=True)
+    P = np.divide(adj, row_sums, out=np.zeros_like(adj), where=row_sums > 1e-8)
 
     # 5. Initial scores (min-max normalized)
     s0 = np.array([float(c.get("score", 0.0)) for c in candidates], dtype=np.float32)
