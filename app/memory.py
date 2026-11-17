@@ -246,7 +246,8 @@ class PineconeMemory:
                     "created_at", "created_at_epoch", "observed_at", "observed_at_epoch",
                     "importance", "pinned",
                     "is_summary", "parent_id", "summary_version", "access_count",
-                    "last_accessed_at", "deleted_at", "provenance",
+                    "last_accessed_at", "deleted_at", "deleted_at_epoch",
+                    "provenance",
                 }
             },
         }
