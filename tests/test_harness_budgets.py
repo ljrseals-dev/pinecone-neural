@@ -41,11 +41,13 @@ class FakeCompletions:
     def __init__(self, content):
         self.content = content
         self.last_messages = None
+        self.last_kwargs = None
         self.calls = 0
 
     def create(self, **kwargs):
         self.calls += 1
         self.last_messages = kwargs["messages"]
+        self.last_kwargs = kwargs
         return SimpleNamespace(
             choices=[SimpleNamespace(message=SimpleNamespace(content=self.content))],
             usage=SimpleNamespace(prompt_tokens=12, completion_tokens=8),
@@ -81,6 +83,9 @@ def test_harness_replays_prior_history_and_enforces_cost_accounting(monkeypatch)
     assert result["tokens_used"] == 20
     assert result["embedding_tokens_used"] == 130
     assert result["cost_usd"] > 0
+    assert harness.client.chat.completions.last_kwargs["reasoning_effort"] == "none"
+    assert "max_completion_tokens" in harness.client.chat.completions.last_kwargs
+    assert "temperature" not in harness.client.chat.completions.last_kwargs
     assert any(m["content"] == "earlier context" for m in harness.client.chat.completions.last_messages)
 
 
