@@ -39,9 +39,9 @@ def test_registry_accepts_only_registered_tools_and_schema():
 def test_calculator_uses_bounded_ast_not_eval():
     tool = CalculatorTool()
     assert asyncio.run(tool.run("2 + 3 * 4")) == "14"
-    assert asyncio.run(tool.run("2 ** 100")) .startswith("ToolError:")
+    assert asyncio.run(tool.run("2 ** 9")).startswith("ToolError:")
     assert asyncio.run(tool.run("__import__('os').getcwd()")).startswith("ToolError:")
-    assert asyncio.run(tool.run("9 ** 9")) == "387420489"
+    assert asyncio.run(tool.run("8 ** 8")) == "16777216"
 
 
 def test_tool_names_must_be_unique():
