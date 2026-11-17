@@ -126,10 +126,12 @@ class AgentHarness:
             )
         except RuntimeError as exc:
             logger.error("Context build failed: %s", type(exc).__name__)
+            self._sync_embedding_usage()
             return {"session_id": self.session_id, "answer": "Context limit exceeded.",
                     "status": "context_overflow", "steps": 0, "tokens_used": 0,
-                    "cost_usd": 0.0, "history_length": len(self.conversation_history),
-                    "memories_used": 0}
+                    "embedding_tokens_used": self.embedding_tokens_used,
+                    "cost_usd": round(self.cost_usd, 8),
+                    "history_length": len(self.conversation_history), "memories_used": 0}
         self._sync_embedding_usage()
         messages.append({"role": "user", "content": context_prompt})
 
