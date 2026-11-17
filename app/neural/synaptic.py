@@ -78,6 +78,12 @@ class SynapticLayer:
                             "ON CONFLICT(src, dst) DO UPDATE SET weight=excluded.weight",
                             (src, dst, w))
 
+    def forget(self, memory_id: str) -> None:
+        """Remove a purged memory node and every edge that references it."""
+        with self._conn() as conn:
+            conn.execute("DELETE FROM edges WHERE src=? OR dst=?", (memory_id, memory_id))
+            conn.execute("DELETE FROM nodes WHERE id=?", (memory_id,))
+
     def spread(self, seed_ids: List[str], hops: int = 1,
                decay: float = 0.5) -> List[Dict[str, Any]]:
         if not seed_ids:
