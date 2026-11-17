@@ -19,8 +19,8 @@ class Settings(BaseSettings):
     pinecone_region: str = "us-east-1"
     embedding_model: str = "text-embedding-3-small"
     embedding_dim: int = Field(default=1536, ge=1, le=20000)
-    llm_model: str = "gpt-4o-mini"
-    summarizer_model: str = "gpt-4o-mini"
+    llm_model: str = "gpt-6-luna"
+    summarizer_model: str = "gpt-6-luna"
 
     max_context_tokens: int = Field(default=3500, ge=256, le=32000)
     summary_token_limit: int = Field(default=200, ge=32, le=4000)
@@ -33,8 +33,8 @@ class Settings(BaseSettings):
     max_run_usd: float = Field(default=0.25, gt=0.0, le=100.0)
     # Configurable estimate rates in USD per 1M tokens. Keep these aligned
     # with the selected provider/model pricing before enabling cost limits.
-    llm_input_cost_per_1m: float = Field(default=0.15, ge=0.0, le=10000.0)
-    llm_output_cost_per_1m: float = Field(default=0.60, ge=0.0, le=10000.0)
+    llm_input_cost_per_1m: float = Field(default=0.10, ge=0.0, le=10000.0)
+    llm_output_cost_per_1m: float = Field(default=0.50, ge=0.0, le=10000.0)
     embedding_cost_per_1m: float = Field(default=0.02, ge=0.0, le=10000.0)
     tool_timeout_s: float = Field(default=2.0, ge=0.1, le=60.0)
     tool_output_max_bytes: int = Field(default=4096, ge=128, le=1048576)
