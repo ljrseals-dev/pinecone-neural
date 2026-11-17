@@ -1,11 +1,11 @@
-# Pinecone Neural Agent Harness (v2.3)
+# Pinecone Neural Agent Harness (v2.5)
 
 Production-oriented **agentic chatbot** with:
 
 - Pinecone vector memory (session-isolated namespaces)
 - Mitigated memory (summarization-ready, soft-delete pruning, near-duplicate detection)
 - Structured agent loop (tool_call / final_answer)
-- Restricted tool execution
+- Allow-listed structured tool execution
 - FastAPI REST API
 
 ---
@@ -235,3 +235,16 @@ for each step:
 at end of run:
     on_episode_reward(all_used_metas, reward)   # still feeds MemRL
 ```
+
+
+## Security update (v2.5)
+
+- Model output is JSON data only. Tool calls must name an explicitly registered tool and supply JSON arguments; arbitrary model-generated Python is not evaluated or executed.
+- Tool names, required fields, unknown fields, primitive types, value lengths/ranges, execution timeout, and output size are checked by the host registry.
+- The calculator uses a bounded AST arithmetic evaluator rather than Python `eval`.
+- API keys are read from validated settings, require at least 32 characters, and have no shipped demo defaults. Empty configuration fails closed.
+- Session history and Pinecone namespaces are scoped to the authenticated API-key user.
+- The Docker image runs as UID 10001. Publish its port on host loopback unless a separate ingress/security design has been reviewed.
+- The legacy `execute_restricted` import remains as a compatibility shim that always refuses code execution.
+
+These controls reduce the harness's authority; they do not make an LLM trustworthy. Do not give the harness root, Docker socket, host filesystem mounts, or unrestricted host command tools.
