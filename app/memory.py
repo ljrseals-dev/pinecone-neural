@@ -238,6 +238,7 @@ class PineconeMemory:
             "access_count": 0,
             "last_accessed_at": now,
             "deleted_at": "",
+            "deleted_at_epoch": 0.0,
             "provenance": provenance or "",
             **{
                 key: value for key, value in (metadata or {}).items()
