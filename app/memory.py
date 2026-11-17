@@ -279,8 +279,17 @@ class PineconeMemory:
             filter={"deleted_at": {"$eq": ""}},
         )
         out = []
+        legacy_epoch_updates = []
         for m in results.matches:
             meta = m.metadata or {}
+            if not meta.get("created_at_epoch") and meta.get("created_at"):
+                try:
+                    created_epoch = datetime.fromisoformat(
+                        str(meta["created_at"]).replace("Z", "+00:00")
+                    ).timestamp()
+                    legacy_epoch_updates.append((m.id, created_epoch))
+                except (TypeError, ValueError, OverflowError):
+                    pass
             score = float(m.score or 0.0)
             if not math.isfinite(score):
                 continue
@@ -309,6 +318,15 @@ class PineconeMemory:
             )
 
         # Neural enhancement (GNN diffusion + synaptic spreading)
+        for memory_id, created_epoch in legacy_epoch_updates:
+            try:
+                self.index.update(
+                    id=memory_id, namespace=self.namespace,
+                    set_metadata={"created_at_epoch": created_epoch},
+                )
+            except Exception as exc:
+                logger.warning("Legacy memory timestamp migration failed: %s", type(exc).__name__)
+
         if use_neural and self.neural is not None and out:
             try:
                 out = self.neural.enhance(query_vector, out, top_k=top_k)
@@ -425,11 +443,34 @@ class PineconeMemory:
                 "deleted_at_epoch": {"$gt": 0.0, "$lt": datetime.fromisoformat(cutoff).timestamp()}
             },
         )
+        cutoff_epoch = datetime.fromisoformat(cutoff).timestamp()
         ids = [
             match.id for match in results.matches
-            if (match.metadata or {}).get("deleted_at")
-            and (match.metadata or {}).get("deleted_at") < cutoff
+            if (match.metadata or {}).get("deleted_at_epoch", 0) > 0
+            and (match.metadata or {}).get("deleted_at_epoch", 0) < cutoff_epoch
         ]
+        # Migrate pre-epoch soft deletes as well. Removing each bounded batch
+        # lets later prune runs advance to the next group of legacy records.
+        legacy = self.index.query(
+            vector=[0.0] * settings.embedding_dim,
+            top_k=100,
+            include_metadata=True,
+            namespace=self.namespace,
+            filter={"deleted_at": {"$ne": ""}},
+        )
+        for match in legacy.matches:
+            meta = match.metadata or {}
+            deleted_at = meta.get("deleted_at")
+            if not deleted_at or meta.get("deleted_at_epoch"):
+                continue
+            try:
+                deleted_epoch = datetime.fromisoformat(
+                    str(deleted_at).replace("Z", "+00:00")
+                ).timestamp()
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if deleted_epoch < cutoff_epoch and match.id not in ids:
+                ids.append(match.id)
         if not ids:
             return 0
         self.index.delete(ids=ids, namespace=self.namespace)
