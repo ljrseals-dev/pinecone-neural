@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     llm_input_cost_per_1m: float = Field(default=0.10, ge=0.0, le=10000.0)
     llm_output_cost_per_1m: float = Field(default=0.50, ge=0.0, le=10000.0)
     embedding_cost_per_1m: float = Field(default=0.02, ge=0.0, le=10000.0)
+    provider_timeout_s: float = Field(default=30.0, ge=1.0, le=300.0)
+    provider_max_retries: int = Field(default=1, ge=0, le=5)
     tool_timeout_s: float = Field(default=2.0, ge=0.1, le=60.0)
     tool_output_max_bytes: int = Field(default=4096, ge=128, le=1048576)
     utility_model_path: str = "data/utility_model.json"
