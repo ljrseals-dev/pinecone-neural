@@ -46,6 +46,8 @@ class SynapticLayer:
                     metadata: Dict[str, Any]) -> None:
         now = datetime.now(timezone.utc).isoformat()
         importance = float(metadata.get("importance", 0.5))
+        if not math.isfinite(importance):
+            raise ValueError("importance must be finite")
         importance = max(0.0, min(1.0, importance))
         with self._conn() as conn:
             conn.execute("""
@@ -82,7 +84,7 @@ class SynapticLayer:
             return []
         if not isinstance(hops, int) or isinstance(hops, bool) or not 0 <= hops <= 3:
             raise ValueError("hops must be between 0 and 3")
-        if not 0.0 <= decay <= 1.0:
+        if not math.isfinite(decay) or not 0.0 <= decay <= 1.0:
             raise ValueError("decay must be between 0 and 1")
         activation: Dict[str, float] = {sid: 1.0 for sid in set(seed_ids)}
         frontier = dict(activation)
