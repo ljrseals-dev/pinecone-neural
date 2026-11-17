@@ -49,3 +49,12 @@ def test_conversation_history_is_sanitized_and_role_limited():
     ])
     assert [item["role"] for item in cleaned] == ["user", "assistant"]
     assert "sk-abcdefghijklmnopqrstuvwxyz" not in cleaned[1]["content"]
+
+
+def test_namespace_is_bounded_and_stable():
+    from app.main import build_namespace
+    short = build_namespace("ci", "session-123")
+    long = build_namespace("u" * 64, "s" * 64)
+    assert short == "user:ci:session:session-123"
+    assert len(long.encode("utf-8")) <= 64
+    assert long == build_namespace("u" * 64, "s" * 64)
