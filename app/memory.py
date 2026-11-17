@@ -205,6 +205,8 @@ class PineconeMemory:
                         "schema_version": "2.1",
                         "created_at_epoch": created_epoch,
                         "deleted_at_epoch": 0.0,
+                        "importance": max(float(meta.get("importance", 0.5)), importance),
+                        "pinned": bool(meta.get("pinned", False) or pinned),
                         "access_count": access_count,
                         "last_accessed_at": now,
                     },
