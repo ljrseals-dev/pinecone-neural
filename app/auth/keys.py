@@ -6,8 +6,8 @@ from typing import Any, Dict, Optional
 
 
 class APIKeyStore:
-    def __init__(self) -> None:
-        raw = os.getenv("API_KEYS", "").strip()
+    def __init__(self, raw: Optional[str] = None) -> None:
+        raw = (os.getenv("API_KEYS", "") if raw is None else raw).strip()
         self._keys: Dict[str, Dict[str, Any]] = {}
         if not raw:
             return
