@@ -1,5 +1,4 @@
 """Binary float32 sidecar for full-precision vectors."""
-import os
 import math
 import sqlite3
 import struct
@@ -10,7 +9,10 @@ from typing import Dict, List, Optional
 
 class VectorSidecar:
     def __init__(self, db_path: str | None = None):
-        self.db_path = Path(db_path or os.getenv("SIDECAR_DB", "data/vectors.db"))
+        if db_path is None:
+            from app.config import settings
+            db_path = settings.sidecar_db
+        self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._local = threading.local()
         self._init_schema()
