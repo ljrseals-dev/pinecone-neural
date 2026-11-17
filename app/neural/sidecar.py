@@ -1,4 +1,6 @@
 """Binary float32 sidecar for full-precision vectors."""
+import os
+import math
 import sqlite3
 import struct
 import threading
@@ -7,8 +9,8 @@ from typing import Dict, List, Optional
 
 
 class VectorSidecar:
-    def __init__(self, db_path: str = "data/vectors.db"):
-        self.db_path = Path(db_path)
+    def __init__(self, db_path: str | None = None):
+        self.db_path = Path(db_path or os.getenv("SIDECAR_DB", "data/vectors.db"))
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._local = threading.local()
         self._init_schema()
@@ -33,10 +35,17 @@ class VectorSidecar:
 
     @staticmethod
     def _pack(vector: List[float]) -> bytes:
-        return struct.pack(f"{len(vector)}f", *vector)
+        if not vector or len(vector) > 65536:
+            raise ValueError("vector dimension is outside supported bounds")
+        values = [float(value) for value in vector]
+        if not all(math.isfinite(value) for value in values):
+            raise ValueError("vector values must be finite")
+        return struct.pack(f"{len(values)}f", *values)
 
     @staticmethod
     def _unpack(blob: bytes, dim: int) -> List[float]:
+        if dim <= 0 or dim > 65536 or len(blob) != dim * 4:
+            raise ValueError("stored vector has invalid dimensions")
         return list(struct.unpack(f"{dim}f", blob))
 
     def put(self, vector_id: str, vector: List[float]) -> None:
