@@ -83,5 +83,8 @@ class ToolRegistry:
             result = json.dumps(result, default=str)
         encoded = result.encode("utf-8")
         if len(encoded) > self.output_max_bytes:
-            result = encoded[:self.output_max_bytes].decode("utf-8", errors="ignore") + "…[truncated]"
+            suffix = "…[truncated]"
+            suffix_bytes = len(suffix.encode("utf-8"))
+            prefix_limit = max(0, self.output_max_bytes - suffix_bytes)
+            result = encoded[:prefix_limit].decode("utf-8", errors="ignore") + suffix
         return result
