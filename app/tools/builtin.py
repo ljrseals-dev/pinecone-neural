@@ -108,7 +108,8 @@ class CalculatorTool(Tool):
 
 def build_default_registry(memory: Any) -> "ToolRegistry":
     from app.tools.registry import ToolRegistry
-    registry = ToolRegistry()
+    from app.config import settings
+    registry = ToolRegistry(timeout_s=settings.tool_timeout_s, output_max_bytes=settings.tool_output_max_bytes)
     registry.register(MemorySearchTool(memory))
     registry.register(MemoryStoreTool(memory))
     registry.register(CalculatorTool())
