@@ -196,9 +196,17 @@ class PineconeMemory:
                     created_epoch = float(meta.get("created_at_epoch") or datetime.fromisoformat(
                         str(meta.get("created_at", now)).replace("Z", "+00:00")
                     ).timestamp())
+                    if not math.isfinite(created_epoch):
+                        raise ValueError("non-finite creation timestamp")
                 except (TypeError, ValueError, OverflowError):
                     created_epoch = time.time()
-                effective_importance = max(float(meta.get("importance", 0.5)), importance)
+                try:
+                    old_importance = float(meta.get("importance", 0.5))
+                    if not math.isfinite(old_importance):
+                        old_importance = 0.5
+                except (TypeError, ValueError):
+                    old_importance = 0.5
+                effective_importance = max(0.0, min(1.0, max(old_importance, importance)))
                 effective_pinned = bool(meta.get("pinned", False) or pinned)
                 self.index.update(
                     id=vid,
