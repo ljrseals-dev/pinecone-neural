@@ -97,3 +97,43 @@ def test_remember_revives_previously_soft_deleted_content(monkeypatch):
     assert memory.index.saved["id"] == memory_id
     assert memory.index.saved["metadata"]["deleted_at"] == ""
     assert memory.index.saved["metadata"]["deleted_at_epoch"] == 0
+
+
+class ExistingActiveIndex(FakeIndex):
+    def __init__(self):
+        super().__init__()
+        self.updated = None
+
+    def fetch(self, ids, namespace):
+        return SimpleNamespace(vectors={
+            ids[0]: SimpleNamespace(
+                metadata={
+                    "text": "safe content",
+                    "created_at": "2026-01-01T00:00:00+00:00",
+                    "access_count": 3,
+                    "importance": 0.8,
+                    "deleted_at": "",
+                },
+                values=[0.1, 0.2, 0.3],
+            )
+        })
+
+    def update(self, **kwargs):
+        self.updated = kwargs
+
+
+def test_idempotent_remember_repairs_neural_sidecar_and_legacy_metadata(monkeypatch):
+    monkeypatch.setattr(settings, "embedding_dim", 3)
+    memory = PineconeMemory.__new__(PineconeMemory)
+    memory.namespace = "user:operator:session:s1"
+    memory.index = ExistingActiveIndex()
+    memory.client = FakeClient()
+    memory.neural = FakeNeural()
+    memory.embedding_tokens_used = 0
+
+    memory_id = memory.remember("safe content", role="fact", importance=0.8)
+    assert memory.index.updated["set_metadata"]["schema_version"] == "2.1"
+    assert memory.index.updated["set_metadata"]["deleted_at_epoch"] == 0.0
+    assert memory.neural.args[0] == memory_id
+    assert memory.neural.args[1] == [0.1, 0.2, 0.3]
+    assert memory.embedding_tokens_used == 0
