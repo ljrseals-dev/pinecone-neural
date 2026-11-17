@@ -111,7 +111,9 @@ class UtilityModel:
 
     def score(self, similarity: float, meta: Dict[str, Any]) -> float:
         features = self._features(similarity, meta)
-        if self._net is None:
+        # Do not expose random initial MLP weights as a useful score. Use the
+        # deterministic teacher until enough online feedback has accumulated.
+        if self._net is None or self._updates < 50:
             return hand_tuned_utility(
                 features[0], recency_days=features[1],
                 access_count=int(features[2]), importance=features[3],
