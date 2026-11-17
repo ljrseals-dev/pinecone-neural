@@ -207,11 +207,29 @@ class UtilityModel:
             "state_dict": {k: v.tolist() for k, v in self._net.state_dict().items()},
         }
         # Simple JSON dump of weights (good enough for a tiny MLP)
+        temporary = None
         try:
-            with open(self.model_path, "w") as f:
-                json.dump(state, f)
-        except Exception as e:
-            logger.warning("Could not save utility model: %s", e)
+            import os
+            import tempfile
+            fd, temporary = tempfile.mkstemp(
+                prefix=self.model_path.name + ".",
+                suffix=".tmp",
+                dir=str(self.model_path.parent),
+            )
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                json.dump(state, stream, allow_nan=False)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, self.model_path)
+            temporary = None
+        except Exception as exc:
+            logger.warning("Could not save utility model: %s", type(exc).__name__)
+        finally:
+            if temporary:
+                try:
+                    os.unlink(temporary)
+                except FileNotFoundError:
+                    pass
 
     def _load(self) -> None:
         if not self.model_path.exists() or self._net is None:
