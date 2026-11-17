@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     tool_timeout_s: float = Field(default=2.0, gt=0.0, le=60.0)
     tool_output_max_bytes: int = Field(default=4096, ge=128, le=1048576)
     utility_model_path: str = "data/utility_model.json"
+    sidecar_db: str = "data/vectors.db"
+    synaptic_db: str = "data/synapses.db"
+    pinecone_index_ready_timeout_s: int = Field(default=120, ge=1, le=600)
 
     # API
     api_keys: str = ""
