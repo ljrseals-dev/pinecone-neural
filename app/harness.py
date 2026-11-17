@@ -191,13 +191,20 @@ class AgentHarness:
                 break
 
             try:
-                response = self.client.chat.completions.create(
-                    model=settings.llm_model,
-                    messages=messages,
-                    temperature=0.2,
-                    max_tokens=completion_limit,
-                    response_format={"type": "json_object"},
-                )
+                request_args = {
+                    "model": settings.llm_model,
+                    "messages": messages,
+                    "response_format": {"type": "json_object"},
+                }
+                if settings.llm_model.startswith("gpt-6-"):
+                    # GPT-6 Chat Completions uses max_completion_tokens and
+                    # supports reasoning_effort="none"; temperature is not sent.
+                    request_args["max_completion_tokens"] = completion_limit
+                    request_args["reasoning_effort"] = "none"
+                else:
+                    request_args["temperature"] = 0.2
+                    request_args["max_tokens"] = completion_limit
+                response = self.client.chat.completions.create(**request_args)
             except Exception:
                 logger.exception("LLM call failed")
                 status = "llm_error"
