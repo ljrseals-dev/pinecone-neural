@@ -130,6 +130,11 @@ class PineconeMemory:
         provenance: str = "",
         metadata: Optional[Dict[str, Any]] = None,
     ) -> str:
+        if not isinstance(importance, (int, float)) or isinstance(importance, bool):
+            raise ValueError("importance must be a number between 0 and 1")
+        if not 0.0 <= float(importance) <= 1.0:
+            raise ValueError("importance must be between 0 and 1")
+        importance = float(importance)
         clean = sanitize_untrusted(text)
         if len(clean) > 8000:
             clean = clean[:8000] + "…[truncated]"
@@ -190,7 +195,15 @@ class PineconeMemory:
             "last_accessed_at": now,
             "deleted_at": "",
             "provenance": provenance or "",
-            **(metadata or {}),
+            **{
+                key: value for key, value in (metadata or {}).items()
+                if key not in {
+                    "schema_version", "session_id", "role", "text", "text_hash",
+                    "created_at", "observed_at", "importance", "pinned",
+                    "is_summary", "parent_id", "summary_version", "access_count",
+                    "last_accessed_at", "deleted_at", "provenance",
+                }
+            },
         }
         self.index.upsert(
             vectors=[{"id": vid, "values": emb, "metadata": meta}],
@@ -231,6 +244,7 @@ class PineconeMemory:
                     "pinned": bool(meta.get("pinned", False)),
                     "is_summary": bool(meta.get("is_summary", False)),
                     "importance": float(meta.get("importance", 0.5)),
+                    "access_count": int(meta.get("access_count", 0)),
                 }
             )
 
