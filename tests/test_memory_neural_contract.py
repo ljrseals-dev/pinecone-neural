@@ -22,7 +22,7 @@ class FakeClient:
     class Embeddings:
         @staticmethod
         def create(**kwargs):
-            return SimpleNamespace(data=[SimpleNamespace(embedding=[0.1, 0.2, 0.3])])
+            return SimpleNamespace(data=[SimpleNamespace(embedding=[0.1, 0.2, 0.3])], usage=SimpleNamespace(total_tokens=3))
 
     embeddings = Embeddings()
 
@@ -41,6 +41,7 @@ def test_remember_preserves_namespace_fields_and_calls_neural_contract():
     memory.index = FakeIndex()
     memory.client = FakeClient()
     memory.neural = FakeNeural()
+    memory.embedding_tokens_used = 0
 
     memory_id = memory.remember(
         "safe content",
@@ -58,6 +59,7 @@ def test_remember_preserves_namespace_fields_and_calls_neural_contract():
     assert saved["metadata"]["deleted_at"] == ""
     assert memory.neural.args[0] == memory_id
     assert memory.neural.args[2] == "safe content"
+    assert memory.embedding_tokens_used == 3
 
 
 def test_remember_rejects_invalid_importance():
