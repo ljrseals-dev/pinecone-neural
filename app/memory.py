@@ -444,7 +444,7 @@ class PineconeMemory:
                 datetime.now(timezone.utc) - timedelta(days=retention_days)
             ).isoformat()
         results = self.index.query(
-            vector=[0.0] * settings.embedding_dim,
+            vector=[1.0] + [0.0] * (settings.embedding_dim - 1),
             top_k=100,
             include_metadata=True,
             namespace=self.namespace,
@@ -461,7 +461,7 @@ class PineconeMemory:
         # Migrate pre-epoch soft deletes as well. Removing each bounded batch
         # lets later prune runs advance to the next group of legacy records.
         legacy = self.index.query(
-            vector=[0.0] * settings.embedding_dim,
+            vector=[1.0] + [0.0] * (settings.embedding_dim - 1),
             top_k=100,
             include_metadata=True,
             namespace=self.namespace,
@@ -507,7 +507,7 @@ class PineconeMemory:
 
         # Practical bounded query (production should paginate with fetch_by_metadata)
         results = self.index.query(
-            vector=[0.0] * settings.embedding_dim,
+            vector=[1.0] + [0.0] * (settings.embedding_dim - 1),
             top_k=100,
             include_metadata=True,
             namespace=self.namespace,
