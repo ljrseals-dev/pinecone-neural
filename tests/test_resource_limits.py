@@ -28,7 +28,7 @@ def test_registry_obeys_output_byte_limit():
     registry = ToolRegistry(timeout_s=2.0, output_max_bytes=128)
     registry.register(LargeOutputTool())
     result = asyncio.run(registry.execute("large_output", {}))
-    assert len(result.encode("utf-8")) <= 140
+    assert len(result.encode("utf-8")) <= 128
     assert result.endswith("…[truncated]")
 
 
