@@ -403,6 +403,38 @@ class PineconeMemory:
             },
         )
 
+    def purge_deleted(self) -> int:
+        """Permanently remove soft-deleted records older than the retention window."""
+        retention_days = settings.soft_delete_retention_days
+        if retention_days == 0:
+            cutoff = utc_now()
+        else:
+            cutoff = (
+                datetime.now(timezone.utc) - timedelta(days=retention_days)
+            ).isoformat()
+        results = self.index.query(
+            vector=[0.0] * settings.embedding_dim,
+            top_k=100,
+            include_metadata=True,
+            namespace=self.namespace,
+            filter={"deleted_at": {"$lt": cutoff}},
+        )
+        ids = [
+            match.id for match in results.matches
+            if (match.metadata or {}).get("deleted_at")
+            and (match.metadata or {}).get("deleted_at") < cutoff
+        ]
+        if not ids:
+            return 0
+        self.index.delete(ids=ids, namespace=self.namespace)
+        if self.neural is not None:
+            for memory_id in ids:
+                try:
+                    self.neural.forget(memory_id)
+                except Exception as exc:
+                    logger.warning("Neural purge failed: %s", type(exc).__name__)
+        return len(ids)
+
     def prune(
         self,
         age_days: Optional[int] = None,
@@ -414,6 +446,7 @@ class PineconeMemory:
             raise ValueError("age_days must be a non-negative integer")
         if not isinstance(utility_floor, (int, float)) or not 0.0 <= utility_floor <= 1.0:
             raise ValueError("utility_floor must be between 0 and 1")
+        purged = self.purge_deleted()
         cutoff = (
             datetime.now(timezone.utc) - timedelta(days=age_days)
         ).isoformat()
@@ -426,7 +459,7 @@ class PineconeMemory:
             namespace=self.namespace,
             filter={"created_at": {"$lt": cutoff}, "deleted_at": {"$eq": ""}},
         )
-        deleted = 0
+        deleted = purged
         for m in results.matches:
             meta = m.metadata or {}
             if meta.get("pinned") or meta.get("role") == "decision":
