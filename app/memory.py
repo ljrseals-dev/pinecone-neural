@@ -563,8 +563,14 @@ class PineconeMemory:
             meta = m.metadata or {}
             if meta.get("pinned") or meta.get("role") == "decision":
                 continue
-            importance = float(meta.get("importance", 0.5))
-            access = int(meta.get("access_count", 0))
+            try:
+                importance = float(meta.get("importance", 0.5))
+                access = max(0, int(meta.get("access_count", 0)))
+                if not math.isfinite(importance):
+                    importance = 0.5
+            except (TypeError, ValueError, OverflowError):
+                importance, access = 0.5, 0
+            importance = max(0.0, min(1.0, importance))
             utility = importance * (1 + 0.1 * access)
             if utility < utility_floor:
                 self.soft_delete(m.id, reason="low_utility_age")
