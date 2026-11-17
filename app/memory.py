@@ -270,17 +270,30 @@ class PineconeMemory:
         out = []
         for m in results.matches:
             meta = m.metadata or {}
+            score = float(m.score or 0.0)
+            if not math.isfinite(score):
+                continue
+            try:
+                importance = float(meta.get("importance", 0.5))
+                if not math.isfinite(importance):
+                    importance = 0.5
+            except (TypeError, ValueError):
+                importance = 0.5
+            try:
+                access_count = max(0, int(meta.get("access_count", 0)))
+            except (TypeError, ValueError):
+                access_count = 0
             out.append(
                 {
                     "id": m.id,
-                    "score": float(m.score or 0.0),
+                    "score": score,
                     "text": meta.get("text", ""),
                     "role": meta.get("role", ""),
                     "timestamp": meta.get("created_at", ""),
                     "pinned": bool(meta.get("pinned", False)),
                     "is_summary": bool(meta.get("is_summary", False)),
-                    "importance": float(meta.get("importance", 0.5)),
-                    "access_count": int(meta.get("access_count", 0)),
+                    "importance": max(0.0, min(1.0, importance)),
+                    "access_count": access_count,
                 }
             )
 
