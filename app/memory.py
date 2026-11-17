@@ -138,6 +138,13 @@ class PineconeMemory:
         return self.pc.Index(settings.pinecone_index)
 
     def _embed(self, text: str) -> List[float]:
+        token_ids = tokenizer.encode(text or "")
+        if len(token_ids) > settings.max_embedding_tokens:
+            logger.warning(
+                "Embedding input truncated from %d to %d tokens",
+                len(token_ids), settings.max_embedding_tokens,
+            )
+            text = tokenizer.decode(token_ids[:settings.max_embedding_tokens])
         resp = self.client.embeddings.create(
             model=settings.embedding_model, input=text
         )
@@ -283,7 +290,7 @@ class PineconeMemory:
                     "created_at", "created_at_epoch", "observed_at", "observed_at_epoch",
                     "importance", "pinned",
                     "is_summary", "parent_id", "summary_version", "access_count",
-                    "last_accessed_at", "deleted_at", "deleted_at_epoch",
+                    "last_accessed_at", "deleted_at", "deleted_at_epoch", "deleted_reason",
                     "provenance",
                 }
             },
