@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     tool_output_max_bytes: int = 4096
 
     # API
+    api_keys: str = ""
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     log_level: str = "INFO"
