@@ -130,6 +130,12 @@ class PineconeMemory:
         provenance: str = "",
         metadata: Optional[Dict[str, Any]] = None,
     ) -> str:
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError("memory text must be a non-empty string")
+        if not isinstance(role, str) or not role.strip() or len(role) > 64:
+            raise ValueError("memory role must be a non-empty string of at most 64 characters")
+        if metadata is not None and not isinstance(metadata, dict):
+            raise ValueError("metadata must be an object")
         if not isinstance(importance, (int, float)) or isinstance(importance, bool):
             raise ValueError("importance must be a number between 0 and 1")
         if not 0.0 <= float(importance) <= 1.0:
@@ -220,6 +226,10 @@ class PineconeMemory:
         return vid
 
     def recall(self, query: str, top_k: int = 8, use_neural: bool = True) -> List[Dict[str, Any]]:
+        if not isinstance(query, str) or not query.strip():
+            raise ValueError("query must be a non-empty string")
+        if not isinstance(top_k, int) or isinstance(top_k, bool) or not 1 <= top_k <= 100:
+            raise ValueError("top_k must be between 1 and 100")
         # Over-fetch when neural reranking is active
         fetch_k = top_k * 3 if (use_neural and self.neural) else top_k
 
@@ -349,8 +359,12 @@ class PineconeMemory:
         age_days: Optional[int] = None,
         utility_floor: Optional[float] = None,
     ) -> int:
-        age_days = age_days or settings.prune_age_days
-        utility_floor = utility_floor or settings.prune_utility_floor
+        age_days = settings.prune_age_days if age_days is None else age_days
+        utility_floor = settings.prune_utility_floor if utility_floor is None else utility_floor
+        if not isinstance(age_days, int) or isinstance(age_days, bool) or age_days < 0:
+            raise ValueError("age_days must be a non-negative integer")
+        if not isinstance(utility_floor, (int, float)) or not 0.0 <= utility_floor <= 1.0:
+            raise ValueError("utility_floor must be between 0 and 1")
         cutoff = (
             datetime.now(timezone.utc) - timedelta(days=age_days)
         ).isoformat()
