@@ -1,5 +1,4 @@
 """Neural layer health and size metrics."""
-import os
 import sqlite3
 from pathlib import Path
 from typing import Any, Dict
