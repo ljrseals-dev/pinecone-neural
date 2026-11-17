@@ -113,12 +113,13 @@ class PineconeMemory:
                     region=settings.pinecone_region,
                 ),
             )
-            deadline = time.monotonic() + settings.pinecone_index_ready_timeout_s
-            while not self.pc.describe_index(settings.pinecone_index).status["ready"]:
-                if time.monotonic() >= deadline:
-                    raise TimeoutError("Pinecone index did not become ready before the configured timeout")
-                time.sleep(2)
+        deadline = time.monotonic() + settings.pinecone_index_ready_timeout_s
         description = self.pc.describe_index(settings.pinecone_index)
+        while not description.status["ready"]:
+            if time.monotonic() >= deadline:
+                raise TimeoutError("Pinecone index did not become ready before the configured timeout")
+            time.sleep(2)
+            description = self.pc.describe_index(settings.pinecone_index)
         dimension = getattr(description, "dimension", None)
         if dimension is not None and int(dimension) != settings.embedding_dim:
             raise ValueError(
