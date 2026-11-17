@@ -10,6 +10,7 @@ class FakeMemory:
 
     def __init__(self):
         self.remembered = []
+        self.embedding_tokens_used = 0
 
     def prune(self):
         return 0
@@ -18,9 +19,11 @@ class FakeMemory:
         return "[QUERY]\n" + query, {"total": 4}
 
     def recall(self, query, top_k=8):
+        self.embedding_tokens_used += 20
         return []
 
     def remember(self, text, **kwargs):
+        self.embedding_tokens_used += 10
         self.remembered.append((text, kwargs))
         return "memory-id"
 
@@ -75,6 +78,7 @@ def test_harness_replays_prior_history_and_enforces_cost_accounting(monkeypatch)
     result = asyncio.run(harness.run("current question"))
     assert result["status"] == "completed"
     assert result["tokens_used"] == 20
+    assert result["embedding_tokens_used"] == 130
     assert result["cost_usd"] > 0
     assert any(m["content"] == "earlier context" for m in harness.client.chat.completions.last_messages)
 
