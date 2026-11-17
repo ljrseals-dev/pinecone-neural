@@ -125,7 +125,7 @@ class PineconeMemory:
         )
         usage = getattr(resp, "usage", None)
         used = getattr(usage, "total_tokens", None)
-        self.embedding_tokens_used += int(used if used is not None else count_tokens(text))
+        self.embedding_tokens_used = int(getattr(self, "embedding_tokens_used", 0)) + int(used if used is not None else count_tokens(text))
         return resp.data[0].embedding
 
     def remember(
