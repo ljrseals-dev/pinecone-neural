@@ -125,6 +125,8 @@ class NeuralRecallPipeline:
             meta.setdefault("importance", candidate.get("importance", 0.5))
             meta.setdefault("access_count", candidate.get("access_count", 0))
             meta.setdefault("is_summary", candidate.get("is_summary", False))
+            candidate["recency_days"] = meta["recency_days"]
+            candidate["access_count"] = meta["access_count"]
             utility_score = candidate["score"]
             if self.enable_utility and self.utility is not None:
                 try:
