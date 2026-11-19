@@ -72,3 +72,30 @@ def test_aclose_closes_only_the_owned_client():
 
     assert harness.client.calls == 1
     assert harness.embedding_client.calls == 0
+
+
+
+def test_constructor_reuses_injected_memory_embedding_client(monkeypatch):
+    from types import SimpleNamespace
+
+    import app.harness as harness_module
+
+    embedding_client = SyncClient()
+    memory = SimpleNamespace(client=embedding_client)
+
+    def unexpected_openai_construction(*args, **kwargs):
+        raise AssertionError("harness must reuse memory.client")
+
+    monkeypatch.setattr(harness_module, "OpenAI", unexpected_openai_construction)
+    async_client = AsyncClient()
+
+    harness = AgentHarness(
+        pc=object(),
+        async_openai_client=async_client,
+        memory=memory,
+        tools=object(),
+    )
+
+    assert harness.embedding_client is embedding_client
+    assert harness._owns_embedding_client is False
+    assert harness._owns_async_client is False
