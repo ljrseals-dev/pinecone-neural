@@ -41,16 +41,22 @@ class AgentHarness:
     ):
         self.session_id = session_id or f"session-{uuid.uuid4().hex[:8]}"
         self.pc = pc or Pinecone(api_key=settings.pinecone_api_key)
-        self.embedding_client = openai_client or OpenAI(
+        # Reuse an injected memory's embedding client instead of constructing
+        # an otherwise-unused client. Only clients created here are owned here.
+        inherited_embedding_client = getattr(memory, "client", None) if memory is not None else None
+        self._owns_embedding_client = openai_client is None and inherited_embedding_client is None
+        self.embedding_client = openai_client or inherited_embedding_client or OpenAI(
             api_key=settings.openai_api_key,
             timeout=settings.provider_timeout_s,
             max_retries=settings.provider_max_retries,
         )
+        self._owns_async_client = async_openai_client is None
         self.client = async_openai_client or AsyncOpenAI(
             api_key=settings.openai_api_key,
             timeout=settings.provider_timeout_s,
             max_retries=settings.provider_max_retries,
         )
+        self._closed = False
         self.memory = memory or PineconeMemory(
             namespace=self.session_id, pc=self.pc, openai_client=self.embedding_client,
         )
@@ -64,6 +70,30 @@ class AgentHarness:
         self.steps_taken = 0
         self._used_memory_ids: List[str] = []
         self._used_metas: List[Dict[str, Any]] = []
+
+    async def aclose(self) -> None:
+        """Close only provider clients created and owned by this harness.
+
+        Injected clients are borrowed; their lifecycle remains with the caller.
+        Both owned clients are given a close attempt even if the first fails.
+        Repeated calls are safe.
+        """
+        if self._closed:
+            return
+        self._closed = True
+        errors: List[BaseException] = []
+        if self._owns_async_client:
+            try:
+                await self.client.close()
+            except BaseException as exc:
+                errors.append(exc)
+        if self._owns_embedding_client:
+            try:
+                await asyncio.to_thread(self.embedding_client.close)
+            except BaseException as exc:
+                errors.append(exc)
+        if errors:
+            raise errors[0]
 
     @staticmethod
     def _clean_history(history: List[Dict[str, str]]) -> List[Dict[str, str]]:
