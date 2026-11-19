@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import time
 from typing import Optional, List, Dict, Any
 
@@ -20,13 +21,15 @@ class MemorySessionStore(SessionStore):
             if entry["expires_at"] is not None and time.time() > entry["expires_at"]:
                 del self._data[session_id]
                 return None
-            return list(entry["history"])
+            # Redis round-trips through JSON, so callers cannot mutate stored
+            # nested message objects. Deep-copy to preserve that isolation.
+            return copy.deepcopy(entry["history"])
 
     async def set(self, session_id: str, history: List[Dict[str, Any]],
                   ttl: int = 86400) -> None:
         async with self._lock:
             self._data[session_id] = {
-                "history": list(history),
+                "history": copy.deepcopy(history),
                 "expires_at": time.time() + ttl if ttl > 0 else None,
             }
 
