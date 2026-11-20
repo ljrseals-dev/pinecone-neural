@@ -1,3 +1,8 @@
+# Copyright (c) 2026 Lewis James Seals Jr.
+# Author: Lewis James Seals Jr. (@ljrseals-dev)
+# Project: Pinecone Neural Agent Harness
+# SPDX-License-Identifier: MIT
+
 """Synaptic associative memory: Hebbian edges + spreading activation."""
 import math
 import sqlite3
