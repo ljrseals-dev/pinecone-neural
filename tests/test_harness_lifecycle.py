@@ -99,3 +99,20 @@ def test_constructor_reuses_injected_memory_embedding_client(monkeypatch):
     assert harness.embedding_client is embedding_client
     assert harness._owns_embedding_client is False
     assert harness._owns_async_client is False
+
+
+def test_aclose_propagates_cancellation_after_attempting_all_owned_cleanup():
+    class CancellingAsyncClient(AsyncClient):
+        async def close(self):
+            self.calls += 1
+            raise asyncio.CancelledError()
+
+    harness = make_harness()
+    harness.client = CancellingAsyncClient()
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(harness.aclose())
+
+    assert harness.client.calls == 1
+    assert harness.embedding_client.calls == 1
+    assert harness._closed is True

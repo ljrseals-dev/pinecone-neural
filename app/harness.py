@@ -85,7 +85,11 @@ class AgentHarness:
         if self._owns_async_client:
             try:
                 await self.client.close()
-            except BaseException as exc:
+            except asyncio.CancelledError as exc:
+                # Finish attempting cleanup of the other owned client before
+                # propagating cancellation to the caller.
+                errors.append(exc)
+            except Exception as exc:
                 errors.append(exc)
         if self._owns_embedding_client:
             try:
