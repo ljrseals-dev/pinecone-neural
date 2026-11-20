@@ -1,11 +1,13 @@
-# Pinecone Neural Agent Harness (v2.3)
+# Pinecone Neural Agent Harness (v2.6)
 
 Production-oriented **agentic chatbot** with:
+
+- GPT-6 Luna Chat Completions by default (override with `LLM_MODEL`)
 
 - Pinecone vector memory (session-isolated namespaces)
 - Mitigated memory (summarization-ready, soft-delete pruning, near-duplicate detection)
 - Structured agent loop (tool_call / final_answer)
-- Restricted tool execution
+- Allow-listed structured tool execution
 - FastAPI REST API
 
 ---
@@ -30,13 +32,15 @@ cp .env.example .env
 #   OPENAI_API_KEY=...
 ```
 
-### 3. Run the API
+### 3. Configure authentication and run locally
+
+Generate a unique API key (at least 32 random characters) and set `API_KEYS=<key>:operator` in `.env`. Do not reuse the sample values from other systems; no demo key is shipped.
 
 ```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+./run.sh
 ```
 
-Open the interactive docs: http://localhost:8000/docs
+The local runner binds to `127.0.0.1` by default. Open the interactive docs at http://127.0.0.1:8000/docs. For Docker, publish the container port only on host loopback, e.g. `-p 127.0.0.1:8000:8000`.
 
 ---
 
@@ -44,21 +48,20 @@ Open the interactive docs: http://localhost:8000/docs
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET`  | `/health` | Health check |
-| `POST` | `/sessions` | Create a new session |
-| `GET`  | `/sessions/{id}` | Check session exists |
-| `POST` | `/chat` | Main chatbot endpoint |
-| `GET`  | `/sessions/{id}/memory` | Inspect retrieved memories |
-| `DELETE` | `/sessions/{id}` | Drop in-memory session |
+| `GET` | `/` | Service information |
+| `GET` | `/health` | Unauthenticated liveness check |
+| `GET` | `/health/neural` | Authenticated neural-layer health |
+| `POST` | `/chat` | Authenticated agent endpoint |
+| `DELETE` | `/sessions/{session_id}` | Delete the caller's session history |
 
-### Example – Chat
+All routes except `/` and `/health` require `X-API-Key` or `Authorization: Bearer`. Session IDs are scoped to the authenticated API-key user.### Example – Chat
 
 ```bash
-curl -X POST http://localhost:8000/chat \
+export API_KEY='<your-random-api-key>'
+curl -X POST http://127.0.0.1:8000/chat \
+  -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{
-    "message": "What are the key differences between Pinecone serverless and pod-based indexes? Store the comparison and summarize it."
-  }'
+  -d '{"message":"Summarize the operational plan and store the approved summary."}'
 ```
 
 Response shape:
@@ -69,169 +72,21 @@ Response shape:
   "answer": "...",
   "status": "completed",
   "steps": 3,
-  "tokens_used": 1842
+  "tokens_used": 1200,
+  "embedding_tokens_used": 320,
+  "cost_usd": 0.0004
 }
 ```
 
-Reuse the same `session_id` on subsequent calls to continue the conversation with the same memory namespace.
+Reuse the returned `session_id` with the same API-key identity to continue the session.
 
----
+## Resource and security controls
 
-## Architecture Overview
-
-```
-Client
-  │
-  ▼
-FastAPI  (/chat, /sessions, /memory)
-  │
-  ▼
-AgentHarness  (structured loop: tool_call | final_answer)
-  │
-  ├── restricted tool runtime (allow-listed builtins)
-  │
-  └── PineconeMemory
-        ├── content-addressable IDs + near-dupe detection
-        ├── soft-delete + prune
-        └── token-budgeted context assembly
-              │
-              ▼
-         Pinecone Serverless (per-session namespace)
-```
-
----
-
-## Key Design Decisions
-
-| Concern | Approach |
-|---------|----------|
-| Memory isolation | One Pinecone namespace per `session_id` |
-| Idempotent writes | Content-hash vector IDs |
-| Near-duplicates | Cosine ≥ 0.95 → bump access instead of insert |
-| Deletion | Soft-delete (`deleted_at`) first |
-| Context control | Hard token budget + composition logging |
-| Tool safety | Restricted builtins + output size cap + sanitization |
-| Termination | JSON schema: `tool_call` or `final_answer` only |
-| Cost control | `max_steps` + `max_run_tokens` circuit breakers |
-
----
-
-## Project Layout
-
-```
-pinecone-agent-harness/
-├── app/
-│   ├── __init__.py
-│   ├── config.py          # pydantic-settings
-│   ├── memory.py          # PineconeMemory
-│   ├── harness.py         # AgentHarness + restricted executor
-│   └── main.py            # FastAPI routes
-├── tests/
-├── .env.example
-├── requirements.txt
-├── README.md
-└── .gitignore
-```
-
----
-
-## Production Notes
-
-- Replace the in-memory `SESSIONS` dict with Redis or a database.
-- Run tool execution inside a real sandbox (gVisor / Firecracker / WASM) for untrusted code.
-- Add authentication (API keys / JWT) in front of `/chat`.
-- Use Pinecone `fetch_by_metadata` with pagination for large-scale pruning.
-- Enable OpenTelemetry for traces and the metrics defined in the design review.
-- Set `CORS_ORIGINS` to your frontend domain(s).
-
----
-
-## License
-
-MIT
-
----
-
-## Neural Memory Layers (v2.1)
-
-The harness now includes the first two neural layers from the full neural memory stack:
-
-| Layer | Name | Status | Training required? |
-|-------|------|--------|--------------------|
-| 2 | GNN Score Diffusion Reranking | **Implemented** | No (parameter-free) |
-| 3 | Synaptic Associative Memory | **Implemented** | No (online Hebbian) |
-| 4 | Learned Utility (MemRL) | Interface ready | Yes (MLP) |
-| 5 | Neuro-Symbolic KG | Interface ready | No (extractor needed) |
-| 1 | Neural Compression | Planned | Optional (PCA or AE) |
-| 6 | Differentiable Hippocampal | Frontier | Yes |
-
-### How it works
-
-```
-Pinecone ANN  →  GNN diffusion (Layer 2)  →  Synaptic spreading (Layer 3)  →  ranked memories
-```
-
-- **GNN diffusion** recovers rank inversions caused by HNSW/PQ noise using 1-hop message passing over the candidate subgraph (~1 ms).
-- **Synaptic layer** builds Hebbian edges between co-activated memories and surfaces associative context that pure vector similarity misses.
-
-Both layers degrade gracefully: if the sidecar or graph is unavailable, the system falls back to raw Pinecone scores.
-
-### Files
-
-```
-app/neural/
-├── gnn_rerank.py      # Layer 2
-├── synaptic.py        # Layer 3 (SQLite)
-├── sidecar.py         # Full-precision vector store for GNN
-└── pipeline.py        # Orchestrates the enhanced recall path
-```
-
-Local data is written under `data/synapses.db` and `data/vectors.db`.
-
----
-
-## v2.2 Hardening + Layer 4
-
-### Critical fixes from the assessment
-
-| Issue | Fix |
-|-------|-----|
-| `on_coactivation` never called | Wired into agent loop termination with success/failure signal |
-| SQLite thread safety | Connection-per-thread for both `vectors.db` and `synapses.db` |
-| Sidecar storage bloat | Binary float32 blobs via `struct` (~5× smaller than JSON) |
-| Utility scoring missing | Layer 4 MemRL-style MLP implemented with cold-start imitation |
-
-### Layer status (v2.2)
-
-| Layer | Status |
-|-------|--------|
-| 2 GNN Score Diffusion | ✅ Production-shaped, binary sidecar |
-| 3 Synaptic Associative Memory | ✅ Thread-safe, Hebbian feedback wired |
-| 4 Learned Utility (MemRL) | ✅ MLP + hand-tuned cold-start + online updates |
-| 5 Neuro-Symbolic KG | Interface ready |
-| 1 Neural Compression | Planned |
-| 6 Differentiable Hippocampal | Frontier |
-
-### Neural feedback loop
-
-At the end of every agent run:
-
-1. All memory IDs that entered context are collected.
-2. `on_coactivation(ids, success)` strengthens/weakens Hebbian edges.
-3. `on_episode_reward(metas, reward)` updates the utility MLP (reward = 1.0 on clean completion).
-
----
-
-## v2.3 — Per-step co-activation (non-cosmetic)
-
-Hebbian edges are now updated **after every reasoning step**, not only at the
-end of the run. Memories that co-occur in the same step form stronger
-associative links; this is strictly more informative than run-level aggregation.
-
-```
-for each step:
-    recall → LLM → tool/answer
-    on_coactivation(step_memory_ids, success=this_step_ok)
-at end of run:
-    on_episode_reward(all_used_metas, reward)   # still feeds MemRL
-```
+- Prior conversation history is replayed only for the authenticated user's session and is bounded to recent user/assistant turns.
+- Agent chat completions use the asynchronous OpenAI client so provider latency does not block the FastAPI event loop. `MAX_CONCURRENT_RUNS` bounds simultaneous runs (default 8), and requests for the same session are serialized within one process. Multi-worker or multi-host deployments still require sticky routing or a distributed session lock.
+- Tool execution uses the configured `TOOL_TIMEOUT_S` and `TOOL_OUTPUT_MAX_BYTES` limits; OpenAI requests have bounded `PROVIDER_TIMEOUT_S` and `PROVIDER_MAX_RETRIES`; Redis connections use `REDIS_CONNECT_TIMEOUT_S` and `REDIS_SOCKET_TIMEOUT_S`.
+- Each run tracks chat-completion and embedding tokens. `MAX_RUN_USD` uses configurable estimated rates: `LLM_INPUT_COST_PER_1M`, `LLM_OUTPUT_COST_PER_1M`, and `EMBEDDING_COST_PER_1M`. Keep these rates aligned with the active provider/model pricing; provider-side billing can differ from estimates. This estimate does not include Pinecone read/write units, Redis, or server costs.
+- Neural storage paths are configurable through `SIDECAR_DB`, `SYNAPTIC_DB`, and `UTILITY_MODEL_PATH`; the health endpoint reads those same paths. Soft-deleted vectors are purged on a subsequent maintenance run after `SOFT_DELETE_RETENTION_DAYS`. Pruning/purge queries are bounded to 100 candidates per invocation.
+- The local runner defaults to loopback. Docker binds inside the container; publish it only to host loopback unless an authenticated reverse-proxy/TLS setup is deliberately configured.
+- Browser CORS is disabled by default. Set `CORS_ORIGINS` only to explicit trusted origins; wildcard origins are rejected.
+- GPT-6 Chat Completions requests use `reasoning_effort=none` and `max_completion_tokens`; legacy model overrides retain the legacy parameter path. Set the token-price environment variables to match the selected model.

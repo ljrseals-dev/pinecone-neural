@@ -1,8 +1,12 @@
+import asyncio
+import hashlib
 import uuid
+from contextlib import asynccontextmanager
 from typing import Any, Dict, Optional
 
 from fastapi import Depends, FastAPI, HTTPException
-from pydantic import BaseModel
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.auth import require_api_key
 from app.harness import AgentHarness
@@ -12,19 +16,65 @@ from app.sessions import make_session_store
 from app.sessions.base import SessionStore
 from app.tools import build_default_registry
 from app.config import settings
-from openai import OpenAI
+from openai import AsyncOpenAI, OpenAI
 from pinecone import Pinecone
+from app.runtime_limits import SessionLockPool, run_semaphore
 
-app = FastAPI(title="Pinecone Neural Agent", version="2.4.0")
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    try:
+        yield
+    finally:
+        try:
+            close = getattr(session_store, "close", None)
+            if close is not None:
+                await close()
+        finally:
+            try:
+                await async_openai_client.close()
+            finally:
+                await asyncio.to_thread(openai_client.close)
+
+
+app = FastAPI(title="Pinecone Neural Agent", version="2.6.0", lifespan=lifespan)
+if settings.cors_origins.strip():
+    origins = [origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()]
+    if not origins or "*" in origins:
+        raise ValueError("CORS_ORIGINS must be an explicit comma-separated origin allowlist")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "DELETE"],
+        allow_headers=["Content-Type", "Authorization", "X-API-Key"],
+    )
 session_store: SessionStore = make_session_store()
-
 pc = Pinecone(api_key=settings.pinecone_api_key)
-openai_client = OpenAI(api_key=settings.openai_api_key)
+openai_client = OpenAI(
+    api_key=settings.openai_api_key,
+    timeout=settings.provider_timeout_s,
+    max_retries=settings.provider_max_retries,
+)
+async_openai_client = AsyncOpenAI(
+    api_key=settings.openai_api_key,
+    timeout=settings.provider_timeout_s,
+    max_retries=settings.provider_max_retries,
+)
+session_locks = SessionLockPool()
+
+
+def build_namespace(principal: str, session_id: str) -> str:
+    raw = f"user:{principal}:session:{session_id}"
+    if len(raw.encode("utf-8")) <= 64:
+        return raw
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    return "u-" + digest[:62]
 
 
 class ChatRequest(BaseModel):
-    message: str
-    session_id: Optional[str] = None
+    model_config = ConfigDict(extra="forbid")
+    message: str = Field(min_length=1, max_length=12000)
+    session_id: Optional[str] = Field(default=None, min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
 
 
 class ChatResponse(BaseModel):
@@ -32,11 +82,14 @@ class ChatResponse(BaseModel):
     answer: str
     status: str = "ok"
     steps: int = 0
+    tokens_used: int = 0
+    embedding_tokens_used: int = 0
+    cost_usd: float = 0.0
 
 
 @app.get("/health")
 def health() -> Dict[str, str]:
-    return {"status": "ok", "version": "2.4.0"}
+    return {"status": "ok", "version": "2.6.0"}
 
 
 @app.get("/health/neural")
@@ -49,56 +102,70 @@ async def chat(
     req: ChatRequest,
     user: Dict[str, Any] = Depends(require_api_key),
 ) -> ChatResponse:
+    # Session IDs are scoped to the authenticated principal. Serialize the
+    # complete read-run-write transaction to prevent lost history updates.
+    principal = str(user["user_id"])
     session_id = req.session_id or str(uuid.uuid4())
+    scoped_id = f"{principal}:{session_id}"
 
-    history = await session_store.get(session_id) or []
-    history.append({"role": "user", "content": req.message})
+    async with session_locks.hold(scoped_id):
+        async with run_semaphore:
+            history = (await session_store.get(scoped_id) or [])[-40:]
+            history.append({"role": "user", "content": req.message})
+            try:
+                memory = await asyncio.to_thread(
+                    PineconeMemory,
+                    namespace=build_namespace(principal, session_id),
+                    pc=pc,
+                    openai_client=openai_client,
+                )
+                tools = build_default_registry(memory)
+                harness = AgentHarness(
+                    session_id=session_id,
+                    pc=pc,
+                    openai_client=openai_client,
+                    async_openai_client=async_openai_client,
+                    memory=memory,
+                    tools=tools,
+                    conversation_history=history[:-1],
+                )
+                result = await harness.run(req.message)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            except Exception:
+                # Do not disclose API credentials, provider errors, or stack details.
+                raise HTTPException(
+                    status_code=500,
+                    detail="Agent request failed; inspect protected server logs.",
+                )
 
-    memory = PineconeMemory(
-        namespace=f"session:{session_id}",
-        pc=pc,
-        openai_client=openai_client,
-    )
-    tools = build_default_registry(memory)
-    harness = AgentHarness(
-        session_id=session_id,
-        pc=pc,
-        openai_client=openai_client,
-    )
-    harness.memory = memory
-    if hasattr(harness, "tools"):
-        harness.tools = tools
-
-    try:
-        result = harness.run(req.message)
-        if isinstance(result, dict):
-            answer = result.get("answer", str(result))
-            status = result.get("status", "ok")
-            steps = result.get("steps", 0)
-        else:
-            answer = str(result)
-            status = "ok"
-            steps = 0
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Agent error: {e}")
-
-    history.append({"role": "assistant", "content": answer})
-    await session_store.set(session_id, history, ttl=86400)
-
-    return ChatResponse(
-        session_id=session_id,
-        answer=answer,
-        status=status,
-        steps=steps,
-    )
+            answer = result.get("answer", "")
+            await session_store.set(
+                scoped_id,
+                (history + [{"role": "assistant", "content": answer}])[-40:],
+                ttl=86400,
+            )
+            return ChatResponse(
+                session_id=session_id,
+                answer=answer,
+                status=result.get("status", "ok"),
+                steps=result.get("steps", 0),
+                tokens_used=result.get("tokens_used", 0),
+                embedding_tokens_used=result.get("embedding_tokens_used", 0),
+                cost_usd=result.get("cost_usd", 0.0),
+            )
 
 
 @app.delete("/sessions/{session_id}")
 async def delete_session(
     session_id: str,
-    _user: Dict[str, Any] = Depends(require_api_key),
+    user: Dict[str, Any] = Depends(require_api_key),
 ) -> Dict[str, str]:
-    await session_store.delete(session_id)
+    if not session_id or len(session_id) > 64 or not all(c.isalnum() or c in "_-" for c in session_id):
+        raise HTTPException(status_code=422, detail="Invalid session ID")
+    scoped_id = f"{user['user_id']}:{session_id}"
+    async with session_locks.hold(scoped_id):
+        await session_store.delete(scoped_id)
     return {"deleted": session_id}
 
 
@@ -106,8 +173,8 @@ async def delete_session(
 def root():
     return {
         "name": "Pinecone Neural Agent",
-        "version": "2.4.0",
+        "version": "2.6.0",
         "docs": "/docs",
         "health": "/health",
-        "auth": "X-API-Key or Authorization: Bearer required on /chat",
+        "auth": "X-API-Key or Authorization: Bearer required on agent endpoints",
     }

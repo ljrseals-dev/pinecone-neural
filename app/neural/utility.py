@@ -32,10 +32,17 @@ def hand_tuned_utility(
     half_life_days: float = 30.0,
 ) -> float:
     """Classic formula used as teacher for cold-start."""
+    values = (similarity, recency_days, float(access_count), importance, half_life_days)
+    if not all(math.isfinite(float(value)) for value in values):
+        raise ValueError("utility inputs must be finite")
+    if half_life_days <= 0 or access_count < 0:
+        raise ValueError("half-life must be positive and access count non-negative")
+    similarity = max(0.0, min(1.0, float(similarity)))
+    recency_days = max(0.0, float(recency_days))
+    importance = max(0.0, min(1.0, float(importance)))
     age_decay = math.exp(-math.log(2) * recency_days / half_life_days)
     access_boost = 1.0 + 0.15 * math.log1p(access_count)
     summary_penalty = 0.6 if is_summary else 1.0
-    pinned_boost = 1.0  # importance already carries this signal
     raw = similarity * age_decay * access_boost * summary_penalty * (0.5 + importance)
     return max(0.0, min(1.0, raw))
 
@@ -50,9 +57,12 @@ class UtilityModel:
 
     def __init__(
         self,
-        model_path: str | Path = "data/utility_model.json",
+        model_path: str | Path | None = None,
         use_torch: bool = True,
     ):
+        if model_path is None:
+            from app.config import settings
+            model_path = settings.utility_model_path
         self.model_path = Path(model_path)
         self.model_path.parent.mkdir(parents=True, exist_ok=True)
         self._torch = None
@@ -84,25 +94,33 @@ class UtilityModel:
         similarity: float,
         meta: Dict[str, Any],
     ) -> List[float]:
-        return [
+        values = [
             float(similarity),
             float(meta.get("recency_days", 0.0)),
             float(meta.get("access_count", 0)),
             float(meta.get("importance", 0.5)),
             1.0 if meta.get("is_summary") else 0.0,
         ]
+        if not all(math.isfinite(value) for value in values):
+            raise ValueError("utility features must be finite")
+        values[0] = max(0.0, min(1.0, values[0]))
+        values[1] = max(0.0, values[1])
+        values[2] = max(0.0, values[2])
+        values[3] = max(0.0, min(1.0, values[3]))
+        return values
 
     def score(self, similarity: float, meta: Dict[str, Any]) -> float:
-        if self._net is None:
+        features = self._features(similarity, meta)
+        # Do not expose random initial MLP weights as a useful score. Use the
+        # deterministic teacher until enough online feedback has accumulated.
+        if self._net is None or self._updates < 50:
             return hand_tuned_utility(
-                similarity,
-                recency_days=float(meta.get("recency_days", 0.0)),
-                access_count=int(meta.get("access_count", 0)),
-                importance=float(meta.get("importance", 0.5)),
-                is_summary=bool(meta.get("is_summary", False)),
+                features[0], recency_days=features[1],
+                access_count=int(features[2]), importance=features[3],
+                is_summary=bool(features[4]),
             )
         import torch
-        feats = torch.tensor([self._features(similarity, meta)], dtype=torch.float32)
+        feats = torch.tensor([features], dtype=torch.float32)
         with torch.no_grad():
             return float(self._net(feats).item())
 
@@ -116,13 +134,21 @@ class UtilityModel:
         Move predicted utilities toward the observed episode reward.
         Returns the MSE loss (0.0 if no torch).
         """
-        if self._net is None or not retrieved:
+        if not retrieved:
+            return 0.0
+        if not math.isfinite(float(reward)):
+            raise ValueError("reward must be finite")
+        reward = max(0.0, min(1.0, float(reward)))
+        sims = list(similarities) if similarities is not None else [
+            float(item.get("score", 0.5)) for item in retrieved
+        ]
+        if len(sims) != len(retrieved):
+            raise ValueError("similarities and retrieved memories must have equal length")
+        if self._net is None:
             return 0.0
 
         import torch
         import torch.nn as nn
-
-        sims = similarities or [0.5] * len(retrieved)
         feats = torch.tensor(
             [self._features(s, m) for s, m in zip(sims, retrieved)],
             dtype=torch.float32,
@@ -155,16 +181,13 @@ class UtilityModel:
             for item in batch:
                 sim = float(item.get("similarity", 0.5))
                 meta = item
-                feats.append(self._features(sim, meta))
-                targets.append(
-                    hand_tuned_utility(
-                        sim,
-                        recency_days=float(meta.get("recency_days", 0.0)),
-                        access_count=int(meta.get("access_count", 0)),
-                        importance=float(meta.get("importance", 0.5)),
-                        is_summary=bool(meta.get("is_summary", False)),
-                    )
-                )
+                features = self._features(sim, meta)
+                feats.append(features)
+                targets.append(hand_tuned_utility(
+                    features[0], recency_days=features[1],
+                    access_count=int(features[2]), importance=features[3],
+                    is_summary=bool(features[4]),
+                ))
             x = torch.tensor(feats, dtype=torch.float32)
             y = torch.tensor(targets, dtype=torch.float32)
             pred = self._net(x).squeeze(-1)
@@ -184,11 +207,29 @@ class UtilityModel:
             "state_dict": {k: v.tolist() for k, v in self._net.state_dict().items()},
         }
         # Simple JSON dump of weights (good enough for a tiny MLP)
+        temporary = None
         try:
-            with open(self.model_path, "w") as f:
-                json.dump(state, f)
-        except Exception as e:
-            logger.warning("Could not save utility model: %s", e)
+            import os
+            import tempfile
+            fd, temporary = tempfile.mkstemp(
+                prefix=self.model_path.name + ".",
+                suffix=".tmp",
+                dir=str(self.model_path.parent),
+            )
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                json.dump(state, stream, allow_nan=False)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, self.model_path)
+            temporary = None
+        except Exception as exc:
+            logger.warning("Could not save utility model: %s", type(exc).__name__)
+        finally:
+            if temporary:
+                try:
+                    os.unlink(temporary)
+                except FileNotFoundError:
+                    pass
 
     def _load(self) -> None:
         if not self.model_path.exists() or self._net is None:

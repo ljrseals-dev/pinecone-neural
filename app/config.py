@@ -1,3 +1,4 @@
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -17,27 +18,44 @@ class Settings(BaseSettings):
     pinecone_cloud: str = "aws"
     pinecone_region: str = "us-east-1"
     embedding_model: str = "text-embedding-3-small"
-    embedding_dim: int = 1536
-    llm_model: str = "gpt-4o-mini"
-    summarizer_model: str = "gpt-4o-mini"
+    embedding_dim: int = Field(default=1536, ge=1, le=20000)
+    max_embedding_tokens: int = Field(default=8000, ge=1, le=8191)
+    llm_model: str = "gpt-6-luna"
+    summarizer_model: str = "gpt-6-luna"
 
-    max_context_tokens: int = 3500
-    summary_token_limit: int = 200
-    prune_age_days: int = 7
-    prune_utility_floor: float = 0.15
-    soft_delete_retention_days: int = 14
+    max_context_tokens: int = Field(default=3500, ge=256, le=32000)
+    summary_token_limit: int = Field(default=200, ge=32, le=4000)
+    prune_age_days: int = Field(default=7, ge=0, le=36500)
+    prune_utility_floor: float = Field(default=0.15, ge=0.0, le=1.0)
+    soft_delete_retention_days: int = Field(default=14, ge=0, le=3650)
 
-    max_steps: int = 6
-    max_run_tokens: int = 50_000
-    max_run_usd: float = 0.25
-    tool_timeout_s: float = 2.0
-    tool_output_max_bytes: int = 4096
+    max_steps: int = Field(default=6, ge=1, le=12)
+    max_concurrent_runs: int = Field(default=8, ge=1, le=128)
+    max_run_tokens: int = Field(default=50_000, ge=256, le=2_000_000)
+    max_run_usd: float = Field(default=0.25, gt=0.0, le=100.0)
+    # Configurable estimate rates in USD per 1M tokens. Keep these aligned
+    # with the selected provider/model pricing before enabling cost limits.
+    llm_input_cost_per_1m: float = Field(default=0.10, ge=0.0, le=10000.0)
+    llm_output_cost_per_1m: float = Field(default=0.50, ge=0.0, le=10000.0)
+    embedding_cost_per_1m: float = Field(default=0.02, ge=0.0, le=10000.0)
+    provider_timeout_s: float = Field(default=30.0, ge=1.0, le=300.0)
+    provider_max_retries: int = Field(default=1, ge=0, le=5)
+    tool_timeout_s: float = Field(default=2.0, ge=0.1, le=60.0)
+    tool_output_max_bytes: int = Field(default=4096, ge=128, le=1048576)
+    utility_model_path: str = "data/utility_model.json"
+    sidecar_db: str = "data/vectors.db"
+    synaptic_db: str = "data/synapses.db"
+    pinecone_index_ready_timeout_s: int = Field(default=120, ge=1, le=600)
 
     # API
-    api_host: str = "0.0.0.0"
-    api_port: int = 8000
+    api_keys: str = ""
+    api_host: str = "127.0.0.1"
+    api_port: int = Field(default=8000, ge=1, le=65535)
+    redis_url: str = ""
+    redis_connect_timeout_s: float = Field(default=3.0, ge=0.1, le=30.0)
+    redis_socket_timeout_s: float = Field(default=5.0, ge=0.1, le=60.0)
     log_level: str = "INFO"
-    cors_origins: str = "*"  # comma-separated in production
+    cors_origins: str = ""  # optional explicit comma-separated origin allowlist
 
 
 settings = Settings()

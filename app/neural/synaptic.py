@@ -1,4 +1,5 @@
 """Synaptic associative memory: Hebbian edges + spreading activation."""
+import math
 import sqlite3
 import threading
 from datetime import datetime, timezone
@@ -7,7 +8,10 @@ from typing import Any, Dict, List
 
 
 class SynapticLayer:
-    def __init__(self, db_path: str = "data/synapses.db"):
+    def __init__(self, db_path: str | None = None):
+        if db_path is None:
+            from app.config import settings
+            db_path = settings.synaptic_db
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._local = threading.local()
@@ -43,11 +47,15 @@ class SynapticLayer:
                     metadata: Dict[str, Any]) -> None:
         now = datetime.now(timezone.utc).isoformat()
         importance = float(metadata.get("importance", 0.5))
+        if not math.isfinite(importance):
+            raise ValueError("importance must be finite")
+        importance = max(0.0, min(1.0, importance))
         with self._conn() as conn:
             conn.execute("""
                 INSERT INTO nodes(id, importance, last_access, access_count)
                 VALUES (?,?,?,1)
                 ON CONFLICT(id) DO UPDATE SET
+                    importance = excluded.importance,
                     access_count = access_count + 1,
                     last_access = excluded.last_access""",
                 (memory_id, importance, now))
@@ -71,11 +79,21 @@ class SynapticLayer:
                             "ON CONFLICT(src, dst) DO UPDATE SET weight=excluded.weight",
                             (src, dst, w))
 
+    def forget(self, memory_id: str) -> None:
+        """Remove a purged memory node and every edge that references it."""
+        with self._conn() as conn:
+            conn.execute("DELETE FROM edges WHERE src=? OR dst=?", (memory_id, memory_id))
+            conn.execute("DELETE FROM nodes WHERE id=?", (memory_id,))
+
     def spread(self, seed_ids: List[str], hops: int = 1,
                decay: float = 0.5) -> List[Dict[str, Any]]:
         if not seed_ids:
             return []
-        activation: Dict[str, float] = {sid: 1.0 for sid in seed_ids}
+        if not isinstance(hops, int) or isinstance(hops, bool) or not 0 <= hops <= 3:
+            raise ValueError("hops must be between 0 and 3")
+        if not math.isfinite(decay) or not 0.0 <= decay <= 1.0:
+            raise ValueError("decay must be between 0 and 1")
+        activation: Dict[str, float] = {sid: 1.0 for sid in set(seed_ids)}
         frontier = dict(activation)
         for _ in range(hops):
             next_frontier: Dict[str, float] = {}
