@@ -1,3 +1,8 @@
+# Copyright (c) 2026 Lewis James Seals Jr.
+# Author: Lewis James Seals Jr. (@ljrseals-dev)
+# Project: Pinecone Neural Agent Harness
+# SPDX-License-Identifier: MIT
+
 """
 Agent loop with explicit allow-listed tool calls and neural memory feedback.
 Model output is data only. It is never compiled, eval'd, or exec'd.
