@@ -1,3 +1,8 @@
+# Copyright (c) 2026 Lewis James Seals Jr.
+# Author: Lewis James Seals Jr. (@ljrseals-dev)
+# Project: Pinecone Neural Agent Harness
+# SPDX-License-Identifier: MIT
+
 """FastAPI dependency: requires a configured X-API-Key or Bearer token."""
 from typing import Optional, Dict, Any
 

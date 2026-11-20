@@ -1,3 +1,8 @@
+# Copyright (c) 2026 Lewis James Seals Jr.
+# Author: Lewis James Seals Jr. (@ljrseals-dev)
+# Project: Pinecone Neural Agent Harness
+# SPDX-License-Identifier: MIT
+
 """Minimal smoke tests – require live keys to run fully."""
 
 import os

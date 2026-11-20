@@ -1,3 +1,8 @@
+# Copyright (c) 2026 Lewis James Seals Jr.
+# Author: Lewis James Seals Jr. (@ljrseals-dev)
+# Project: Pinecone Neural Agent Harness
+# SPDX-License-Identifier: MIT
+
 """API-key authentication. Configure API_KEYS as key:user_id comma-separated pairs."""
 import hmac
 import os
